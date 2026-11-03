@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { alpha, AppPalette, Radius, Spacing } from '../constants/appTheme';
+import { AppPalette, Radius, Spacing } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { track } from '../lib/analytics';
 import {
@@ -15,19 +15,13 @@ import {
 } from '../lib/pauseInvites';
 
 /**
- * Raden ovanför PAUSE på Hem: vilka vänner som bjuds in när pausen startar
- * (lib/pauseInvites.ts). Utan val är den en enda länk, *Invite friends*;
- * med val visar den ansiktena och namnen, och ett tryck öppnar väljaren igen.
- *
- * **Höjden är fast (`PAUSE_INVITE_ROW_H`)**, för heronens räkning på Hem
- * lägger den till i sina extras — en rad som växte med antalet namn hade ätit
- * golvet under PAUSE. Därför står namnen på en rad och kapas, och ansiktena
- * slutar vid tre.
+ * Knappen bredvid PAUSE på Hem: vilka vänner som bjuds in när pausen startar
+ * (lib/pauseInvites.ts). Bara en symbol, på begäran; orden *Invite friends*
+ * stod förr på en egen rad ovanför knappen. Med val visar den den första
+ * vännens ansikte och hur många som är valda, och ett tryck öppnar väljaren.
+ * Står på samma rad som PAUSE, så den tar ingen höjd i heronens räkning.
  */
-export const PAUSE_INVITE_ROW_H = 36;
-
-const FACE = 26;
-const FACES_SHOWN = 3;
+const INVITE_BUTTON = 34;
 
 export function PauseInviteRow({ userId }: { userId: string }) {
   const Palette = usePalette();
@@ -36,16 +30,11 @@ export function PauseInviteRow({ userId }: { userId: string }) {
   const [open, setOpen] = useState(false);
 
   const names = selection.map(f => f.username);
-  const label = names.length === 0
-    ? 'Invite friends'
-    : names.length <= 2
-      ? `With ${names.join(' & ')}`
-      : `With ${names[0]}, ${names[1]} +${names.length - 2}`;
 
   return (
     <>
       <TouchableOpacity
-        style={[styles.row, selection.length > 0 && styles.rowSelected]}
+        style={styles.button}
         onPress={() => setOpen(true)}
         activeOpacity={0.7}
         accessibilityRole="button"
@@ -54,18 +43,17 @@ export function PauseInviteRow({ userId }: { userId: string }) {
           : `Inviting ${names.join(', ')} when your pause starts. Change.`}
       >
         {selection.length === 0 ? (
-          <FontAwesome5 name="user-plus" size={12} color={Palette.hue} />
+          <FontAwesome5 name="user-plus" size={11} color={Palette.hue} />
         ) : (
-          <View style={[styles.faces, { width: FACE + (Math.min(selection.length, FACES_SHOWN) - 1) * (FACE * 0.62) }]}>
-            {selection.slice(0, FACES_SHOWN).map((f, i) => (
-              <View key={f.id} style={[styles.faceRing, { left: i * FACE * 0.62, zIndex: FACES_SHOWN - i }]}>
-                <Face friend={f} size={FACE} />
+          <>
+            <Face friend={selection[0]} size={INVITE_BUTTON} />
+            {selection.length > 1 && (
+              <View style={styles.count}>
+                <Text style={styles.countText}>{selection.length}</Text>
               </View>
-            ))}
-          </View>
+            )}
+          </>
         )}
-        <Text style={styles.rowText} numberOfLines={1}>{label}</Text>
-        {selection.length > 0 && <FontAwesome5 name="pen" size={9} color={Palette.textTertiary} />}
       </TouchableOpacity>
 
       <InvitePicker visible={open} userId={userId} onClose={() => setOpen(false)} />
@@ -244,32 +232,24 @@ function InvitePicker({ visible, userId, onClose }: { visible: boolean; userId: 
 }
 
 const makeStyles = (Palette: AppPalette) => StyleSheet.create({
-  // ── Raden ovanför PAUSE ──
-  row: {
-    height: PAUSE_INVITE_ROW_H,
-    flexDirection: 'row',
+  // ── Knappen bredvid PAUSE ──
+  // Designsystemets *quiet*: en 2 px kant och ingen fyllning. Fyllt är
+  // accentens, och PAUSE är den.
+  button: {
+    width: INVITE_BUTTON,
+    height: INVITE_BUTTON,
+    borderRadius: INVITE_BUTTON / 2,
     alignItems: 'center',
-    alignSelf: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    borderRadius: Radius.pill,
-    maxWidth: '86%',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Palette.surfaceAlt,
   },
-  // Med val får raden en ton, så att den läses som ett val och inte som en
-  // länk — men ingen fyllning: fyllt är accentens, och knappen under är den.
-  rowSelected: {
-    backgroundColor: Palette.hueTint,
-    borderWidth: 1,
-    borderColor: alpha(Palette.hue, 0.3),
-    paddingLeft: 5,
+  count: {
+    position: 'absolute', right: -4, bottom: -4,
+    minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3,
+    backgroundColor: Palette.accent, alignItems: 'center', justifyContent: 'center',
   },
-  rowText: { flexShrink: 1, fontSize: 14, fontWeight: '600', color: Palette.hue },
-  faces: { height: FACE, position: 'relative' },
-  faceRing: {
-    position: 'absolute', top: 0,
-    borderRadius: FACE / 2, borderWidth: 1.5, borderColor: Palette.bg,
-    marginTop: -1.5, marginLeft: -1.5,
-  },
+  countText: { fontSize: 11, fontWeight: '700', color: Palette.onAccent },
   faceFallback: {
     backgroundColor: Palette.surfaceAlt, alignItems: 'center', justifyContent: 'center',
   },

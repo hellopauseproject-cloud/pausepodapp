@@ -16,6 +16,8 @@ import { AppPalette, alpha } from '../constants/appTheme';
 import { useAuth } from '../contexts/AuthContext';
 import { usePalette } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
+import { fetchMyGlobalPauseWindows } from '../lib/globalPause';
+import { GlobalPauseWeekCard } from '../components/global-pause-week-card';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -29,6 +31,8 @@ type MyWrappedData = {
   avatarUrl: string | null;
   sharedPauseCount: number;
   bestBuddy: { username: string; avatarUrl: string | null } | null;
+  /** Global Pauses man pausade i, senaste sju dagarna (lib/globalPause.ts). */
+  globalPauseCount: number;
 };
 
 type PageConfig = {
@@ -114,6 +118,7 @@ const makePages = (Palette: AppPalette, styles: WrappedStyles): PageConfig[] => 
         {data.pauseCount >= 3 && data.pauseCount < 7 && (
           <Text style={styles.subtle}>A good rhythm.</Text>
         )}
+        {data.globalPauseCount > 0 && <GlobalPauseWeekCard count={data.globalPauseCount} />}
       </View>
     ),
   },
@@ -270,7 +275,7 @@ export default function MyWrappedScreen() {
       if (!user?.id) return;
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-      const [{ data: sessions }, { data: profile }] = await Promise.all([
+      const [{ data: sessions }, { data: profile }, globalWindows] = await Promise.all([
         supabase
           .from('pause_sessions')
           .select('duration_seconds, intention, shared_session_id')
@@ -284,7 +289,10 @@ export default function MyWrappedScreen() {
           .select('avatar_url')
           .eq('id', user.id)
           .maybeSingle(),
+        fetchMyGlobalPauseWindows(),
       ]);
+      const weekFrom = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const globalPauseCount = globalWindows.filter(w => w.from >= weekFrom).length;
 
       const rows = sessions ?? [];
       const pauseCount = rows.length;
@@ -332,7 +340,7 @@ export default function MyWrappedScreen() {
         pauseCount, totalMinutes, avgMinutes, longestMinutes,
         topIntention, topIntentionEmoji,
         avatarUrl: profile?.avatar_url ?? null,
-        sharedPauseCount, bestBuddy,
+        sharedPauseCount, bestBuddy, globalPauseCount,
       });
 
       Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();

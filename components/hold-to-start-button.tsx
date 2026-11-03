@@ -45,6 +45,8 @@ type Props = {
   /** Radien som fyllningen klipps mot — samma som knappens. */
   borderRadius: number;
   accessibilityLabel: string;
+  /** Ritas under hållfyllningen, t.ex. PAUSE-knappens yta. */
+  background?: ReactNode;
   /** Typografin för *Keep holding* (placeringen sätter komponenten själv). */
   hintStyle: StyleProp<any>;
   children: ReactNode;
@@ -52,7 +54,7 @@ type Props = {
 
 export function HoldToStartButton({
   onComplete, holdMs, disabled, style, fillColor, borderRadius,
-  accessibilityLabel, hintStyle, children,
+  accessibilityLabel, hintStyle, children, background,
 }: Props) {
   const Palette = usePalette();
   const progress = useSharedValue(0);
@@ -126,6 +128,7 @@ export function HoldToStartButton({
           if (e.nativeEvent.actionName === 'activate' && !disabled) fire();
         }}
       >
+        {background}
         {/* Klippningen ligger på ett eget lager, så att knappens skugga inte
             klipps bort på iOS av `overflow: hidden`. */}
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius, overflow: 'hidden' }]}>

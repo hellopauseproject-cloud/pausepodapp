@@ -4,11 +4,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useNavigation } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { AppPalette, Radius, Spacing, alpha } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { IntentionSettings } from '../components/intention-settings';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { track } from '../lib/analytics';
 import { supabase } from '../lib/supabase';
@@ -42,7 +43,6 @@ function ProfileScreen() {
   const [saved, setSaved] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
-  const [showStats, setShowStats] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [unsavedAction, setUnsavedAction] = useState<any>(null);
 
@@ -54,7 +54,6 @@ function ProfileScreen() {
     if (!user?.id) {
       setName('');
       setPhoto(null);
-      setShowStats(false);
       originalName.current = '';
       originalPhoto.current = null;
       return;
@@ -63,7 +62,7 @@ function ProfileScreen() {
     const fetchProfile = async () => {
       const { data } = await supabase
         .from('profiles')
-        .select('username, avatar_url, show_stats')
+        .select('username, avatar_url')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -75,7 +74,6 @@ function ProfileScreen() {
         const p = data.avatar_url?.startsWith('https://') ? data.avatar_url : null;
         setName(n);
         setPhoto(p);
-        setShowStats(data.show_stats ?? false);
         originalName.current = n;
         originalPhoto.current = p;
       }
@@ -83,12 +81,6 @@ function ProfileScreen() {
 
     fetchProfile();
   }, [user?.id]);
-
-  const toggleShowStats = async (value: boolean) => {
-    setShowStats(value);
-    if (!user) return;
-    await supabase.from('profiles').update({ show_stats: value }).eq('id', user.id);
-  };
 
   const uploadAvatar = async (localUri: string): Promise<string | null> => {
     try {
@@ -245,23 +237,9 @@ function ProfileScreen() {
         />
       </View>
 
-      {/* Visa statistik för vänner */}
-      <View style={styles.section}>
-        <View style={styles.statsToggleRow}>
-          <View style={styles.statsToggleText}>
-            <Text style={styles.sectionTitle}>Show my stats</Text>
-            <Text style={styles.sectionSubtitle}>
-              Lets friends see your weekly summary.
-            </Text>
-          </View>
-          <Switch
-            value={showStats}
-            onValueChange={toggleShowStats}
-            trackColor={{ false: Palette.ink12, true: Palette.accent }}
-            thumbColor={Palette.onAccent}
-          />
-        </View>
-      </View>
+      {/* Intentionerna — flyttade hit från Settings. "Show my stats" är
+          borttagen: pausstatistiken syns alltid för vänner. */}
+      <IntentionSettings />
 
       {!!errorText && <Text style={styles.saveError}>{errorText}</Text>}
 

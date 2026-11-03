@@ -19,7 +19,9 @@ import { intentionTone, PauseTagChips } from '../components/pause-tag-chips';
 import { FlipCard } from '../components/flip-card';
 import { contextLine, FactSession, pauseQuote, recordLine } from '../lib/pauseFacts';
 import { SleepSessionCard } from '../components/sleep-session-card';
+import { GlobeGrid } from '../components/globe-grid';
 import { PodBoxIcon } from '../components/pod-box-icon';
+import { fetchMyGlobalPauseWindows } from '../lib/globalPause';
 import { Cheerer, getCheersFor } from '../lib/pauseCheers';
 import { setPauseIntention } from '../lib/pauseTags';
 import { getNightProgress, getSleepNights } from '../lib/sleep';
@@ -112,6 +114,8 @@ type SessionItem = {
   /** Vilka som hjärtat pausen efteråt (supabase/pause_cheers.sql). */
   cheers: Cheerer[];
   withPod: boolean | null;
+  /** Pausen låg i en Global Pause (lib/globalPause.ts). */
+  globalPause: boolean;
   /** En natt (supabase/sleep.sql) visas som ett eget kort med natthimmel. */
   kind: 'pause' | 'sleep';
   endedAt: string | null;
@@ -263,6 +267,15 @@ function StatsScreen() {
         .order('started_at', { ascending: false });
 
       const rows = all ?? [];
+      // Vilka pauser som låg i en Global Pause: de som överlappar ett av mina
+      // fönster, med en minuts marginal åt båda hållen.
+      const globalWindows = await fetchMyGlobalPauseWindows();
+      const inGlobal = (start: string | null, end: string | null) => {
+        if (!start || !end || globalWindows.length === 0) return false;
+        const a = new Date(start).getTime();
+        const b = new Date(end).getTime();
+        return globalWindows.some(w => a <= w.to + 60_000 && b >= w.from - 60_000);
+      };
       const recent = rows;
       const ids    = recent.map(r => r.id);
 
@@ -326,6 +339,7 @@ function StatsScreen() {
         msg: msgMap[r.id] ?? null,
         cheers: cheerMap[r.id] ?? [],
         withPod: r.with_pod ?? null,
+        globalPause: r.kind !== 'sleep' && inGlobal(r.started_at, r.ended_at),
         kind: r.kind === 'sleep' ? 'sleep' : 'pause',
         endedAt: r.ended_at ?? null,
         wakeCount: r.wake_count ?? 0,
@@ -461,6 +475,7 @@ function StatsScreen() {
           <FontAwesome name="chevron-left" size={14} color={Palette.accent} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
+        <Text style={styles.pageTitle}>YOUR PAUSES</Text>
       </Animated.View>
 
       {/* Diagrammet får ta hela första skärmen — listan under nås genom att
@@ -574,6 +589,13 @@ function StatsScreen() {
                 front={
               <View style={[styles.sessionCard, { borderColor: cardBorder }]}>
                 <View pointerEvents="none" style={[styles.sessionTint, { backgroundColor: alpha(tone, Palette.mode === 'dark' ? 0.09 : 0.07) }]} />
+                {/* Nere i högra hörnet, i samma kolumn som lådan ovanför (lika
+                    bred som den), så att de står centrerade under varandra. */}
+                {s.globalPause && (
+                  <View style={styles.globeCorner} pointerEvents="none" accessibilityLabel="Global Pause">
+                    <GlobeGrid size={30} active={false} />
+                  </View>
+                )}
                 <View style={styles.sessionCardTop}>
                   <View style={[styles.sessionBadge, { backgroundColor: alpha(tone, Palette.mode === 'dark' ? 0.2 : 0.15) }]}>
                     {cat
@@ -589,7 +611,13 @@ function StatsScreen() {
                         hörnet. "Utan låda" visades förr som en egen ikon på
                         varje paus — men nästan alla pauser är utan låda, så
                         den sa ingenting. */}
-                    {isPod && <PodBoxIcon />}
+                    {/* Lådan, och under den jordklotet från Global Pause-rummet,
+                        centrerade mot varandra. */}
+                    {isPod && (
+                      <View style={styles.markers}>
+                        {isPod && <PodBoxIcon />}
+                      </View>
+                    )}
                     {s.cheers.length > 0 && <CheerFaces cheers={s.cheers} styles={styles} Palette={Palette} />}
                     {s.msg && (
                       <TouchableOpacity style={styles.mailBtn} onPress={() => openMsg(s.msg!)} activeOpacity={0.65}>
@@ -713,6 +741,11 @@ const makeStyles = (Palette: AppPalette, Night: AppPalette) => StyleSheet.create
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginBottom: 12, marginTop: 4,
   },
+  // Sidans rubrik, designsystemets display: Arial Black 900, versaler, tätt.
+  pageTitle: {
+    fontSize: 26, lineHeight: 30, fontWeight: '900', letterSpacing: -0.6,
+    color: Palette.textPrimary, marginTop: 14, marginBottom: 18,
+  },
   sectionLabel: {
     fontSize: 12, fontWeight: '700', color: Palette.ink30,
     letterSpacing: 3, textTransform: 'uppercase',
@@ -788,6 +821,9 @@ const makeStyles = (Palette: AppPalette, Night: AppPalette) => StyleSheet.create
   },
   sessionBadgeEmoji: { fontSize: 22 },
   sessionMain: { flex: 1, gap: 2 },
+  markers: { alignItems: 'center', gap: 6 },
+  // Lådans bredd (PodBoxIcon, 52) och kortets padding (16).
+  globeCorner: { position: 'absolute', right: 16, bottom: 14, width: 52, height: 30, alignItems: 'center' },
   sessionCardRight: { alignItems: 'flex-end', gap: 6 },
   sessionDur: { fontSize: 26, lineHeight: 30, fontWeight: '900', color: Palette.textPrimary, letterSpacing: -0.5 },
   // `ink28` låg under textens kontrastgolv (se *Grå text har ett

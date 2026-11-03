@@ -16,11 +16,12 @@ import { initAnalytics, track } from '../lib/analytics';
 import { isIntroDeferred } from '../lib/introPrefs';
 import { normalizePairCode, setPendingPairCode, takePendingPairCode } from '../lib/tagPairing';
 import {
-  CIRCLE_CHAT_TYPE, CIRCLE_GOAL_TYPE, PAUSE_INVITE_TYPE, SUPPORT_RECEIVED_TYPE, SUPPORT_REQUEST_TYPE,
+  CIRCLE_CHAT_TYPE, CIRCLE_GOAL_TYPE, GLOBAL_PAUSE_TYPE, PAUSE_INVITE_TYPE, SUPPORT_RECEIVED_TYPE, SUPPORT_REQUEST_TYPE,
   cancelDailyReminder, initNotifications,
   registerPushToken, syncDailyReminder,
 } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
+import { reportGlobalPause } from '../lib/globalPause';
 import { closePauseInvites, finishPauseInvite } from '../lib/pauseInvites';
 import { clearStalePausingFlag, setPausingFlag } from '../lib/pausingFlag';
 import { flushOutbox } from '../lib/sessionOutbox';
@@ -242,6 +243,9 @@ function InnerLayout() {
         case SUPPORT_REQUEST_TYPE:
         case SUPPORT_RECEIVED_TYPE:
           router.navigate('/(tabs)/friends' as never);
+          return;
+        case GLOBAL_PAUSE_TYPE:
+          router.push('/global-pause' as never);
           return;
         // Pausens id följer med, så att Friends kan säga att värden hunnit
         // sluta i stället för att bara inte visa något kort.
@@ -587,6 +591,9 @@ function InnerLayout() {
       }
       const startedAt = new Date(endedAt.getTime() - duration * 1000);
 
+      // Står annars kvar som *pausing* i rummet tills den globala pausen slutar.
+      reportGlobalPause('finished');
+
       if (duration < 5) {
         // Räknas som ett bortfall och inte som en paus: raden skrivs inte,
         // så den syns aldrig i pause_sessions. Utan händelsen vore en
@@ -731,6 +738,7 @@ function InnerLayout() {
         <Stack.Screen name="profile" options={{ headerShown: false }} />
         <Stack.Screen name="add-friend" options={{ headerShown: false }} />
         <Stack.Screen name="pair" options={{ headerShown: false }} />
+        <Stack.Screen name="global-pause" options={{ headerShown: false }} />
         <Stack.Screen name="friend-wrapped" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="my-wrapped" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="circle-wrapped" options={{ headerShown: false, animation: 'fade' }} />

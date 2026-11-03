@@ -17,7 +17,10 @@ import { DurationWheel } from '../../components/duration-wheel';
 import { HoldToStartButton } from '../../components/hold-to-start-button';
 import { LiquidBars } from '../../components/liquid-bars';
 import { ProgressArc } from '../../components/progress-arc';
-import { PAUSE_INVITE_ROW_H, PauseInviteRow } from '../../components/pause-invite-row';
+import { GLOBAL_PAUSE_LINE_H, GlobalPauseLine } from '../../components/global-pause-line';
+import { PauseAmbience } from '../../components/pause-ambience';
+import { PauseButtonFace } from '../../components/pause-button-face';
+import { PauseInviteRow } from '../../components/pause-invite-row';
 import { PauseTagSheet } from '../../components/pause-tag-sheet';
 import { roomShell, ScreenBackground } from '../../components/screen-background';
 import { NoteRect, TodoPostIt, TodoSheet } from '../../components/todo-sheet';
@@ -91,11 +94,11 @@ const PAUSE_BTN_H = 58;    // utskriven höjd, se `pauseButton`
 const GOAL_MET_H = 28;     // `GOAL REACHED` + dess marginal
 const NIGHT_TITLE_H = 44;  // *Ready for bed?* under månen: 28 + marginTop 16
 const SET_GOAL_BTN_H = 46; // `Set a daily goal` / `Finish setting up`
-// Inbjudningsraden ovanför PAUSE (components/pause-invite-row.tsx) plus
-// luften mellan den och knappen. Den luften är egen och liten med flit: raden
-// hör till knappen, inte till heron, så den står inte ett `hero.gap` ifrån.
-const INVITE_ROW_GAP = 12;
-const INVITE_ROW_H = PAUSE_INVITE_ROW_H + INVITE_ROW_GAP;
+// Blocket står inte exakt i mitten av ytan: PAUSE ska inte hamna för långt ner,
+// så ytan räknas så här mycket kortare nedtill.
+const BLOCK_LIFT = 64;
+// Luften mellan topbaren och platsen för Global Pause-raden.
+const GLOBAL_LINE_GAP = 12;
 const RING_MAX = 280;
 // Golvet är läsbarhetens: under det är siffran inte ett mått längre.
 const RING_MIN = 150;
@@ -533,14 +536,13 @@ function HomeScreen() {
   const showInviteRow = !isNight && !!user?.id;
   const heroExtras = MODE_PILL_H
     + (isNight ? NIGHT_TITLE_H : goalMet ? GOAL_MET_H : 0)
-    + (introDeferred ? SET_GOAL_BTN_H : 0)
-    + (showInviteRow ? INVITE_ROW_H : 0);
+    + (introDeferred ? SET_GOAL_BTN_H : 0);
   // Ytan mäts från blockets egen överkant (`centerY`) ner till containerns
   // innerkant. Innan båda landat gäller en räkning ur fönstret.
   const [centerY, setCenterY] = useState(0);
   const heroArea = centerY && frameH
-    ? frameH - BOTTOM_PAD - centerY
-    : Math.round(windowH * 0.82) - topPad - TOPBAR_H - BOTTOM_PAD;
+    ? frameH - BOTTOM_PAD - centerY - BLOCK_LIFT
+    : Math.round(windowH * 0.82) - topPad - TOPBAR_H - BOTTOM_PAD - BLOCK_LIFT;
   const hero = useMemo(
     () => heroMetrics(heroArea, frameW || windowW, heroExtras),
     [heroArea, frameW, windowW, heroExtras],
@@ -582,9 +584,16 @@ function HomeScreen() {
   const bodyH = HOME_RING_VIEW ? heroRing.size + (ringOpensGoal ? 0 : STEPPER_H) : hero.ring;
   const blockH = EYEBROW_H + bodyH + hero.gap + PAUSE_BTN_H + heroExtras;
   const blockTop = centerY + Math.max(0, (hero.area - blockH) / 2);
+  // Global Pause-raden står mitt emellan topbaren och Day/Night (blockets
+  // överkant). Platsen den tar i flödet (`globalLine`) står kvar, så att
+  // blocket under inte flyttar sig; raden själv svävar i mitten av luften.
+  const topbarBottom = centerY - GLOBAL_PAUSE_LINE_H - GLOBAL_LINE_GAP;
+  const bannerTop = centerY
+    ? Math.max(topbarBottom, (topbarBottom + blockTop) / 2 - GLOBAL_PAUSE_LINE_H / 2)
+    : topbarBottom + GLOBAL_LINE_GAP;
   // Inbjudningsraden står mellan målraden och knappen, så den räknas bort här
   // också — annars lyfts heron raden högre än den behöver.
-  const readoutBottom = blockTop + blockH - PAUSE_BTN_H - hero.gap - (showInviteRow ? INVITE_ROW_H : 0);
+  const readoutBottom = blockTop + blockH - PAUSE_BTN_H - hero.gap;
   const roomAbove = Math.max(0, blockTop - centerY - MIN_TOP_GAP);
   const tagTop = frameH - tagSheetH;
   const tagLift = tag && tagSheetH ? clamp(readoutBottom + TAG_CLEARANCE - tagTop, 0, roomAbove) : 0;
@@ -664,7 +673,7 @@ function HomeScreen() {
       <Animated.View style={[styles.topBar, { opacity: fadeAnim }]}>
         <View style={styles.logoRow}>
           <FontAwesome name="pause" size={16} color={Palette.hue} />
-          <Text style={styles.logoText}>PAUSE POD</Text>
+          <Text style={styles.logoText}>PAUSEPOD</Text>
         </View>
 
         <View style={styles.rightButtons}>
@@ -694,6 +703,19 @@ function HomeScreen() {
           </TouchableOpacity>
         </View>
       </Animated.View>
+
+      {/* Raden för den globala pausen. Platsen står kvar i nattläge, så att
+          blocket inte hoppar när läget byts. Den ligger över blocket och inte
+          i det: `centerY` mäts under den, så ytan räknas rätt av sig själv. */}
+      <View style={styles.globalLine} />
+      {showInviteRow && centerY > 0 && (
+        <Reanimated.View
+          style={[styles.globalLineFloat, { top: bannerTop }, pauseFadeStyle]}
+          pointerEvents={tag ? 'none' : 'box-none'}
+        >
+          <GlobalPauseLine />
+        </Reanimated.View>
+      )}
 
       {/* Höjden är ytan mellan topbaren och containerns nederkant, uppmätt och
           inte gissad. Blocket står centrerat i den, så luften som blir över
@@ -938,18 +960,14 @@ function HomeScreen() {
             svävar inte med knappen — den är ett val, inte knappen — men
             tonar bort med den medan taggkortet står uppe. Höjden ingår i
             heronens extras (`INVITE_ROW_H`). */}
-        {showInviteRow && (
-          <Reanimated.View
-            style={[styles.inviteRowWrap, pauseFadeStyle]}
-            pointerEvents={tag ? 'none' : 'auto'}
-          >
-            <PauseInviteRow userId={user!.id} />
-          </Reanimated.View>
-        )}
         <Animated.View style={[styles.pauseButtonWrap, { transform: [{ translateY: floatAnim }] }]}>
           {/* Tonar bort medan taggkortet står uppe — kortet ligger ovanpå
               den platsen, och en knapp under ett kort ska inte gå att nå. */}
-          <Reanimated.View style={[styles.pauseButtonWrap, pauseFadeStyle]} pointerEvents={tag ? 'none' : 'auto'}>
+          <Reanimated.View style={[styles.pauseButtonRow, pauseFadeStyle]} pointerEvents={tag ? 'none' : 'auto'}>
+            {/* Lika breda sidor, så att PAUSE står kvar i mitten. */}
+            {/* Skenet bakom knappen. Absolut, så att det inte tar plats i raden. */}
+            <PauseAmbience />
+            <View style={styles.pauseSide} />
             {/* Med valskärmen påslagen öppnar ett tryck den, som förut. Utan
                 den är det här enda stället en paus startar, och då hålls
                 knappen in — samma knapp och samma tal som CHECK IN, och samma
@@ -963,6 +981,7 @@ function HomeScreen() {
                 onComplete={startSleep}
                 holdMs={HOLD_TO_START_MS}
                 borderRadius={PAUSE_BTN_H / 2}
+                background={<PauseButtonFace radius={PAUSE_BTN_H / 2} />}
                 accessibilityLabel="Start the night"
                 hintStyle={styles.holdHint}
               >
@@ -991,6 +1010,7 @@ function HomeScreen() {
                 onComplete={() => startPhonePause('push')}
                 holdMs={HOLD_TO_START_MS}
                 borderRadius={PAUSE_BTN_H / 2}
+                background={<PauseButtonFace radius={PAUSE_BTN_H / 2} />}
                 accessibilityLabel="Start a pause"
                 hintStyle={styles.holdHint}
               >
@@ -1001,6 +1021,9 @@ function HomeScreen() {
                 <Text style={styles.pauseButtonText}>PAUSE</Text>
               </HoldToStartButton>
             )}
+            <View style={styles.pauseSide}>
+              {showInviteRow && <PauseInviteRow userId={user!.id} />}
+            </View>
           </Reanimated.View>
         </Animated.View>
         </View>
@@ -1110,9 +1133,10 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  // Märket i ett ord, som i designsystemet.
   logoText: {
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '900',
     color: Palette.hue,
     letterSpacing: 4,
   },
@@ -1198,11 +1222,11 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     alignItems: 'center',
     width: '100%',
   },
-  inviteRowWrap: {
-    width: '100%',
-    alignItems: 'center',
-    marginBottom: INVITE_ROW_GAP,
-  },
+  pauseButtonRow: { flexDirection: 'row', alignItems: 'center', width: '100%' },
+  pauseSide: { flex: 1, alignItems: 'flex-start', paddingLeft: 12 },
+  // Platsen Global Pause-raden tar i flödet; raden själv svävar (`bannerTop`).
+  globalLine: { height: GLOBAL_PAUSE_LINE_H, alignSelf: 'stretch', marginTop: GLOBAL_LINE_GAP },
+  globalLineFloat: { position: 'absolute', left: 0, right: 0 },
   // Knappen tar sin bredd ur sitt innehåll, inte ur spalten: en pille som
   // slutar där ordet slutar läses som en knapp och låter strecken vara sidans
   // huvudsak. Höjden är utskriven (58, `PAUSE_BTN_H`): heronens räkning högst
@@ -1217,11 +1241,12 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     height: PAUSE_BTN_H,
     paddingHorizontal: 44,
     borderRadius: Radius.pill,
+    // Designsystemets glöd: för det som är viktigast, och på Hem är det PAUSE.
     shadowColor: Palette.accent,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.32,
-    shadowRadius: 14,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 22,
+    elevation: 12,
   },
   pauseGlyph: { flexDirection: 'row', gap: 5 },
   pauseGlyphBar: { width: 6, height: 18, borderRadius: 3, backgroundColor: Palette.onAccent },
@@ -1231,7 +1256,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   pauseButtonText: {
     color: Palette.onAccent,
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '900',
     letterSpacing: 3.4,
   },
 });

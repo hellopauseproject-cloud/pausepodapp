@@ -35,19 +35,22 @@ export const HOLD_TO_START_MS = 700;
  * rörs inte (den filen ändras bara i gest och utseende), så de två finns som
  * två kopior; ändras den ena ska den andra följas åt. Händelsen bär dessutom
  * `skipped_setup: true`, så att tratten kan skilja de två vägarna åt.
+ *
+ * `category` är intentionen när den redan är vald — det rummet för den globala
+ * pausen, där man väljer den vid *I'll join*.
  */
-export function startPhonePause(how: 'push' | 'replace' = 'push') {
+export function startPhonePause(how: 'push' | 'replace' = 'push', category = '') {
   // Efter midnatt finns ingen dagpaus att starta — se `isNightHours`.
   if (isNightHours()) { startSleep(how, 'night_hours'); return; }
   track('pause_mode_selected', {
     with_pod: false,
-    category: null,
+    category: category || null,
     shared: false,
     skipped_setup: true,
   });
   const params = {
     mode: 'session',
-    category: '',
+    category,
     withPod: 'false',
     pauseType: 'session',
     targetSeconds: '0',

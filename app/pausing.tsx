@@ -17,6 +17,7 @@ import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { track } from '../lib/analytics';
 import { recordPauseInCircle } from '../lib/circles';
 import { nextMidnight } from '../lib/homeMode';
+import { reportGlobalPause } from '../lib/globalPause';
 import { HOLD_TO_START_MS } from '../lib/pauseFlow';
 import {
   closePauseInvites, finishPauseInvite, newSharedId, sendPauseInvites, takePauseInviteSelection,
@@ -426,9 +427,22 @@ function PausingScreen() {
     const shared = sharedRef.current;
     if (shared?.role === 'host') closePauseInvites(shared.id, null);
     else if (shared?.role === 'guest') finishPauseInvite(shared.id, null);
+    if (!isSleep) reportGlobalPause('finished');
     dispatch({ type: 'RESET' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Den globala pausen (lib/globalPause.ts) ──
+  // Rummet visar klockan som den står här: den går när telefonen ligger nedåt
+  // och står still *on hold* när den lyfts. Utan anmälan händer ingenting i
+  // SQL. `hasRestedRef`, för fasen är 'active' en stund innan telefonen lagts
+  // ner. Lådans paus räknas när den sparas, av en trigger.
+  useEffect(() => {
+    if (!isManualOriginRef.current || isSleep || !hasRestedRef.current) return;
+    if (state.phase === 'active') reportGlobalPause('running');
+    else if (state.phase === 'respite') reportGlobalPause('held');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase]);
 
   // ── Lådlöst: skärmen nedåt ÄR vilan. Klockan går bara medan telefonen
   // ligger nedåtvänd; vänds den upp eller lyfts den, fryser den och skärmen
@@ -880,6 +894,7 @@ function PausingScreen() {
       // 5 min" också hittar pausen hos den andra.
       if (shared?.role === 'host') await closePauseInvites(shared.id, durationSeconds);
       else if (shared?.role === 'guest') await finishPauseInvite(shared.id, durationSeconds);
+      reportGlobalPause('finished');
       await logPause(durationSeconds, 'session', state.category || undefined);
       // Natten efter midnatt: en sömnrad från midnatt (eller läggningen) till
       // lyftet. Inga uppvaknanden — lyftet avslutade den. Kortare än

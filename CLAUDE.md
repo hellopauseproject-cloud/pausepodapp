@@ -13,8 +13,9 @@ Appen startar ritualen, lådan äger den sedan hela vägen och producerar alla
 händelser. Appen är ett register: den hjälper användaren fram till locket och
 tar emot färdiga sessioner efteråt.
 
-**Appen skickar sex notiser: en lokal och fem push, och de två sorterna är
-olika hela vägen ner.** De fyra senaste — kretsens chatt, stödförfrågan,
+**Appen skickar sju notiser: två lokala och fem push, och de två sorterna är
+olika hela vägen ner.** Den sjunde är påminnelsen om den globala pausen (se
+*Den globala pausen*). De fyra som kom närmast före den — kretsens chatt, stödförfrågan,
 stödsvaret, pausinbjudan — beskrivs under *De sociala notiserna* nedan; de byggdes på
 begäran, och varje fick ett eget tak innan den fick finnas.
 Räkningen gick 0 → 2 → 0 → 2 → 6, och varje steg var ett beslut. De gamla två
@@ -248,9 +249,14 @@ en väntskärm (`app/pause-invite-waiting.tsx`, raderad) tills vännen svarade:
 appen bad en stirra på telefonen, ett nej blev en skärm att läsa, och en
 inbjudan som aldrig besvarades hade inget slut.
 
-- **Valet görs på Hem.** Raden ovanför PAUSE
-  ([components/pause-invite-row.tsx](components/pause-invite-row.tsx)) säger
-  *Invite friends*, eller visar ansiktena och namnen på de valda. Väljaren
+- **Raden för Global Pause är en kapsel i designsystemets ribbon**, i flikarnas ljusa toner (`#8CC4FF → #7FE0B0 → #FFB77D`), lite genomskinlig med en mjuk glans upptill och ingen kant. Ett mörkblått jordklot är namnet i alla lägen, och texten är mörk navy: *Next · 18:00*, *Tomorrow · 18:00*, *In 1h 20min*, *12 pausing now*, och *Done* en kvart efter slutet, sedan nästa. En prick andas vid jordklotet medan den pågår. En ribbon som bara kant, och dessförinnan honung, prövades och föll. Honung prövades och föll på begäran: den lästes som en varning. Den står överst på Hem, under topbaren och utanför blocket. `BLOCK_LIFT` håller blocket högre, så att PAUSE inte hamnar för långt ner. Raden har luft mot topbaren (`marginTop`), och lyftet är höjt i samma andetag så att blocket under inte flyttade ner.
+- **PAUSE står i ett eget sken** ([components/pause-ambience.tsx](components/pause-ambience.tsx)), på Hem och i Global Pause-rummet: en bred ljusblå och en tät accentblå radiell glöd bakom knappen som andas på 6 s.
+- **Global Pause-raden är grå tills den pågår.** Då tänds ribbon, glansen och en ljusreflex som sveper över den, och pricken vid jordklotet skiftar genom ribbonens tre färger. Raden svävar mitt emellan topbaren och Day/Night (`bannerTop`), medan platsen den tar i flödet står kvar så att blocket inte flyttar sig.
+- **PAUSE är ett material, inte en platt färg** ([components/pause-button-face.tsx](components/pause-button-face.tsx)): en toning ljus upptill och djup nedtill, designsystemets ljusa pausblå som ett ljus inifrån uppe i mitten, och en hårfin ljuskant som är starkast upptill (Liquid Glass spekulära kant, Linears inre ljuslinje). Den ligger under hållfyllningen (`background`). En platt ljus övre halva prövades först och föll: två färger är inte ett material. Inbjudan bor i knappen bredvid PAUSE.
+- **Valet görs på Hem.** Knappen
+  ([components/pause-invite-row.tsx](components/pause-invite-row.tsx)) är bara
+  en symbol bredvid PAUSE, på begäran, och visar den första valda vännens
+  ansikte och antalet. Väljaren
   visar en vän som redan pausar nedtonad som *Anna is already pausing…* —
   synlig men inte valbar. Knappen i Friends-listans rad är en genväg dit: den
   lägger till vännen och går till Hem.
@@ -276,6 +282,46 @@ inbjudan som aldrig besvarades hade inget slut.
   för en gäst *Anna invited you · …* — och hämtar om medan någon pausar.
   Inget pronomen. Hälsningen går till dem som slutat, för den hänger på deras
   `pause_sessions`-rad, och den som fortfarande pausar har ingen än.
+
+## Den globala pausen
+
+En gång om dagen pausar alla samtidigt. Schema och regler i
+[supabase/global_pause.sql](supabase/global_pause.sql) (körs för hand efter
+`circles.sql`), klienten i [lib/globalPause.ts](lib/globalPause.ts), rummet i
+[app/global-pause.tsx](app/global-pause.tsx) och raden på Hem i
+[components/global-pause-line.tsx](components/global-pause-line.tsx). Svaret på
+"ingen använder appen": något att göra samtidigt som andra.
+
+- **Rummet är en enda sak: en mjuk gloria.** Två versioner föll: siffror med en lista var platt, och en himmel med en prick per person var rörig. Nu står tiden eller antalet i en gloria, under den ansikten och en rad som byter person (*Anna is reading*). Sidan rullar inte. Alla finns bakom ansiktena, i ett ark med ett rutnät: `PEOPLE_SHOWN` visas först, och *20 more* / *+100 more* (avrundat nedåt) visar resten. *I'll join* är ett tryck och ser därför inte ut som PAUSE, som hålls in: en ram och ingen fyllning. Den anmäler direkt, och intentionen väljs i ett ark i stunden pausen startas. Bakom glorian roterar ett jordklot av linjer i ribbon-färgerna ([components/globe-grid.tsx](components/globe-grid.tsx)), ett varv på 90 s och tonat mot kanten; det står still med reducerad rörelse. PAUSE är samma knapp och storlek som på Hem och står i ungefär samma höjd (`ACTIONS_BOTTOM`). Efter *I'll join* går det inte att gå ur: *Leave* togs bort på begäran. När den är slut står *You were there.* för den som pausade i den (`last.was_there`). Siffran i glorian är display, Arial Black 900 och tät. Raden och ansiktena ligger absolut över glorians nederkant, så att klotet står på samma plats i alla lägen. Rummet hör till `night`. **Inga statusord:** *on hold* och *done* står inte om någon person; klockan står bara still.
+- **Den heter *Global Pause*** (`GLOBAL_PAUSE_NAME` i lib/notifications.ts). *Pause Hour*, *Phones Down* och några till prövades eller föreslogs och valdes bort: namnet ska säga rakt ut att det är en paus för alla.
+- **Ett enda ögonblick för hela världen**, visat i lokal tid. Ingen väljer
+  tidszon: det hade delat rummet. Schemat är en rad per veckodag i
+  `global_pause_schedule`, i Stockholmstid, och ändras bara där. Tiderna är
+  valda på begäran: mån 19, tis 18, ons 17, tors 20, fre 18, lör 11, sön 13,
+  en timme var. Tiderna ska ses över om appen får användare långt bort.
+- **Dörren står öppen 10 minuter före till 30 minuter efter starten.** Den
+  egna pausen går hur länge som helst. Den globala blir DONE vid sitt slut och
+  rör aldrig pausen; rummet säger DONE i en kvart (`last`).
+- **Man anmäler sig, och sedan räknas man.** En lådpaus har ingen intention, eftersom den väljs när pausen startas i appen, så den står som *is pausing*. Bara den med en rad
+  i `global_pause_joins` syns; en vanlig paus rapporterar också, men utan rad
+  är det en no-op i SQL. Påbörjad före dörren öppnats räknas pausen inte, för
+  rapporten kommer bara vid start och frysning.
+- **Klockan i rummet är pausens klocka.** `report_global_pause` tar `running`,
+  `held` och `finished` från [app/pausing.tsx](app/pausing.tsx), och tiden räknas
+  i SQL. *On hold* stämmer så länge appen hinner rapportera; en sovande telefon
+  ligger efter tills nästa rapport kommer, av samma skäl som hjärtslag inte går
+  (se *Pausa tillsammans*).
+- **Lådpauser räknas när de sparas**, av triggern på `pause_sessions`, alltså
+  inte live. Live kräver att lådan skickar start och frysning över WiFi.
+- **Alla i rummet syns med användarnamn**, på begäran: *Someone* var opersonligt, och att anmäla sig är att kliva in i rummet. `global_pause_joins` har inga grants och `get_global_pause` lämnar aldrig ut ett `user_id`. Vänner och kretskamrater står först, i rummens kulörer. En egen intention är fritext och visas som *is pausing* för alla andra.
+- **Inga bottar, och siffrorna är alltid de riktiga.**
+- **Påminnelsen är lokal**, 10 minuter före, och läggs ut av *I'll join*. Den
+  är appens sjunde notis, och den kan inte växa av sig själv: man väljer den
+  själv, en gång per global paus. Egen Android-kanal.
+- **Efter en paus i en Global Pause** visar sammanfattningen ([components/global-pause-summary.tsx](components/global-pause-summary.tsx)) jordklotet, pausens tid, hur många man pausade med och tiden tillsammans, och under det nästa Global Pause med *I'll join* (ett tryck byter knappen mot *You're in*, tiden står kvar), i nattrummet, och stannar tills *Back to start*. Har man sett den visar rummet nästa i stället för DONE (`wasSummarized`). Statistiksidan har rubriken *YOUR PAUSES* och Friends *FRIENDS*, samma display (26 pt, 900). På pausens kort står jordklotet nere i högra hörnet, centrerat under lådan. Veckans sammanfattning (my-wrapped) har ett ribbonkort med antalet Global Pauses de senaste sju dagarna ([components/global-pause-week-card.tsx](components/global-pause-week-card.tsx)), bara när det är minst en. `get_my_last_global_result()` avgör, inom tio minuter efter att ens rad slutat (eller medan den ännu går, eftersom `finished` kan komma efter), och den visas en gång per Global Pause. En vanlig ensam paus byter som förut direkt till Hem.
+- **I statistiken** står samma jordklot under lådan på en paus som låg i en Global Pause. Kortet matchar på tid mot `get_my_global_pauses()` (en minuts marginal), utan någon kolumn på `pause_sessions`.
+- **Inget här får stoppa en paus.** `reportGlobalPause` väntas aldrig in, och
+  triggern har `exception when others`.
 
 ## Kretsens dagsmålsnotis
 
@@ -1228,6 +1274,7 @@ fortfarande utan grönt.
 [components/pause-tag-chips.tsx](components/pause-tag-chips.tsx)). Där är
 grönt en *kategori* — skog och blad — och betyder inte att något gått vägen,
 samma sorts undantag som Kretsens stege.
+**Ett sjunde undantag, på begäran:** *Done* och dess gloria när Global Pause är slut ([app/global-pause.tsx](app/global-pause.tsx)), i `Palette.success`. Det är en bekräftelse, samma sort som det fjärde och femte.
 Ett nytt grönt någon annanstans ska förklaras på samma sätt eller inte finnas.
 Arial Black-liknande versaler (`fontWeight: '900'` + versaler) för
 displaytext, vanlig vikt för brödtext. Instruktioner på tre till fyra ord,
@@ -1453,6 +1500,8 @@ kulör, inte appens färg. `Palette.shadow` är däremot inte längre accenten:
 den var en blå glöd under varje kort i mörkt läge, och mot plommon blev det en
 andra kulör i stället för ett lyft.
 
+**Designsystemet är PausePod-systemet** (Claude Design, *PausePod Designsystem*): natt i Navy 900/800/700/950 med Sky 300, värme i honung och kräm, ett ljus per flik, Arial Black-versaler, kicker +0.2em, allt rundat, 1 px linjer i stället för skugga och glöd bara för det viktigaste. Pause-rummet i mörkt läge följer dess nattfärger exakt; de andra rummen är inte omlagda än.
+
 **Varje flik har ett *rum*.** Ett rum byter fem nycklar — `hue`, `bg`,
 `surface`, `surfaceAlt` och `sunken` — och tabellen står i `ROOMS` i
 [constants/appTheme.ts](constants/appTheme.ts): Pause blå, Circle grön,
@@ -1610,7 +1659,7 @@ bara tre av dem är flikar. Resten ärver rummet från vad de *handlar om*:
 | `circle` | `circle-chat`, `circle-create`, `circle-invite`, `circle-welcome` |
 | `friends` | `add-friend`, `support-story-create`, `support-view-text`, `support-respond-text`, `support-respond-voice`, `text-message`, `call`, `voice` |
 | `study` | `stats`, `onboarding` (Settings), `profile` — ingen flik alls |
-| `night` | `pausing` — ingen flik, och **mörkt i båda lägena** |
+| `night` | `pausing`, `global-pause` — ingen flik, och **mörkt i båda lägena** |
 
 **`night` är det enda rummet som inte byter läge.** Det bär pausen medan den
 pågår, och natten är poängen. `roomMode()` svarar därför `dark` för det oavsett
@@ -2084,9 +2133,12 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
       Inget gupp med reducerad rörelse.
     - **Pappret är inte palettstyrt** (`PAPER`), av samma skäl som regnbågen på
       nivåmärket: en post-it har sin egen kulör, och `highlight` är senapsbrun
-      i ljust läge. Det är **gult** (`#f6dd7a` ljust / dämpad `#e6cb68`
-      mörkt) med plommonbrunt bläck. En kort stund var det ljus pastell-lila,
-      men gult togs tillbaka på begäran — en post-it ska se ut som en post-it.
+      i ljust läge. Det är ett **varmt, nästan vitt papper** (designsystemets Cream ljusad,
+      `#fbf6ec` ljust / dämpad `#e7dfd0` mörkt) med Navy-bläck och tunna
+      neutrala linjer. Det var gult (för mycket uppmärksamhet, fanns ingen
+      annanstans), en kort stund pastell-lila, och sedan Ice (blåvitt), som
+      krockade med Kretsens gröna i ljust läge. Pappret ska vara neutralt nog
+      för både det blå och det gröna rummet.
     - **Arket är den egna listan**: skriva, bocka av, ångra, radera. Avbockade
       punkter syns en vecka (`DONE_VISIBLE_DAYS`), sedan bara i databasen.
       - **Det är samma papper som lappen** (`PAPER`, inte rummets
@@ -2516,7 +2568,8 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
   - `null` betyder både "ingen krets" och "inte vänner", och kortet skiljer
     inte på dem — ett "hen är med i en krets men du får inte se vilken" vore
     att läcka just det som inte lämnas ut. Raden uteblir helt.
-  - **`profiles.show_stats` gäller inte här.** Den flaggan styr pausaktivitet
+  - **`profiles.show_stats` läses inte längre någonstans** (november 2026, på begäran): växeln *Show my stats* i profilen är borttagen, och vänner ser alltid pausstatistiken. Kolumnen står kvar oläst. Policyn på `pause_sessions` har aldrig läst den, så ingen SQL behövdes. *What do you do during your pause?* flyttade från Settings till profilen ([components/intention-settings.tsx](components/intention-settings.tsx)) och sparas vid varje tryck; Settings har ingen Spara-knapp längre.
+- **`profiles.show_stats` gäller inte här.** Den flaggan styr pausaktivitet
     (senaste pausen, wrapped-knappen), står `false` som förval, och en
     kretstillhörighet är hemvist snarare än statistik — att gömma den bakom
     en flagga som nästan ingen slagit på hade gjort funktionen osynlig.

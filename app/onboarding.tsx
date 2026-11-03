@@ -1,8 +1,7 @@
-import { Entypo, FontAwesome, FontAwesome5 } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
-import { router, useFocusEffect, useNavigation } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { AppPalette, Radius, Spacing, alpha, darkPalette, lightPalette } from '../constants/appTheme';
 import { RoomProvider, ThemePreference, usePalette, useTheme } from '../contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,7 +9,6 @@ import { roomShell, ScreenBackground } from '../components/screen-background';
 import { track } from '../lib/analytics';
 import { fetchMyTags, formatTagUid, type MyTag, removeMyTag } from '../lib/tagPairing';
 import DismissKeyboardView from './components/DismissKeyboardView';
-import { Category, DEFAULT_CATEGORIES, saveSelectedCategories } from './pauseLogger';
 
 type ThemeOption = {
   value: ThemePreference;
@@ -27,8 +25,6 @@ const THEME_OPTIONS: ThemeOption[] = [
   { value: 'system', label: 'System', left: lightPalette, right: darkPalette },
 ];
 
-const CATEGORIES_PATH = FileSystem.documentDirectory + 'selectedCategories.json';
-const CUSTOM_CATEGORIES_PATH = FileSystem.documentDirectory + 'customCategories.json';
 
 function ThemeSwatchHalf({ palette }: { palette: typeof darkPalette }) {
   const Palette = usePalette();
@@ -62,17 +58,9 @@ function SettingsScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const insets = useSafeAreaInsets();
-  // Utseendet sparas direkt när man trycker och har ingenting med
-  // Spara-knappen längst ned att göra — den hör till kategorierna, och ett
-  // val man ser slå igenom på en gång vill ingen behöva bekräfta.
+  // Utseendet sparas direkt när man trycker. Intentionerna, som hade
+  // skärmens Spara-knapp, bor i profilen (components/intention-settings.tsx).
   const { preference, setPreference } = useTheme();
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [customCategories, setCustomCategories] = useState<Category[]>([]);
-  const [newEmoji, setNewEmoji] = useState('');
-  const [newLabel, setNewLabel] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
-  const [unsavedAction, setUnsavedAction] = useState<any>(null);
   // `null` = inte hämtat (eller nätet föll); `[]` = inga taggar.
   const [myTags, setMyTags] = useState<MyTag[] | null>(null);
 
@@ -111,105 +99,6 @@ function SettingsScreen() {
       ],
     );
   };
-  const navigation = useNavigation();
-
-  const originalCategories = useRef<string[]>([]);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const cats = await FileSystem.readAsStringAsync(CATEGORIES_PATH);
-        const parsed = JSON.parse(cats);
-        setSelectedCategories(parsed);
-        originalCategories.current = parsed;
-      } catch (e) {}
-      try {
-        const custom = await FileSystem.readAsStringAsync(CUSTOM_CATEGORIES_PATH);
-        setCustomCategories(JSON.parse(custom));
-      } catch (e) {}
-    };
-    load();
-  }, []);
-
-  const toggleCategory = (id: string) => {
-    setSelectedCategories(prev => {
-      const next = prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id];
-      setHasChanges(true);
-      return next;
-    });
-  };
-
-  const addCustomCategory = async () => {
-    if (!newEmoji.trim() || !newLabel.trim()) return;
-    const newCat: Category = {
-      id: 'custom_' + Date.now(),
-      label: newLabel.trim().toUpperCase(),
-      emoji: newEmoji.trim(),
-    };
-    const updated = [...customCategories, newCat];
-    setCustomCategories(updated);
-    setSelectedCategories(prev => [...prev, newCat.id]);
-    await FileSystem.writeAsStringAsync(CUSTOM_CATEGORIES_PATH, JSON.stringify(updated));
-    setNewEmoji('');
-    setNewLabel('');
-    setHasChanges(true);
-  };
-
-  const removeCustomCategory = async (id: string) => {
-    const updated = customCategories.filter(c => c.id !== id);
-    setCustomCategories(updated);
-    setSelectedCategories(prev => prev.filter(c => c !== id));
-    await FileSystem.writeAsStringAsync(CUSTOM_CATEGORIES_PATH, JSON.stringify(updated));
-    setHasChanges(true);
-  };
-
-  const allCategories = [...DEFAULT_CATEGORIES, ...customCategories];
-
-  const handleSave = async () => {
-    await saveSelectedCategories(
-      allCategories.filter(c => selectedCategories.includes(c.id)).map(c => c.id)
-    );
-
-    // Antalet, inte vilka. Vilka kategorier som används syns redan i
-    // analytics.category_mix, och där betyder de något — en vald kategori som
-    // ingen pausar i är bara en kryssruta.
-    track('categories_saved', { count: selectedCategories.length, custom: customCategories.length });
-
-    setSaved(true);
-    setHasChanges(false);
-    originalCategories.current = selectedCategories;
-    setTimeout(() => setSaved(false), 2500);
-  };
-
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
-      if (!hasChanges) return;
-      e.preventDefault();
-      setUnsavedAction(e.data.action);
-    });
-    return unsubscribe;
-  }, [hasChanges, navigation]);
-
-  const handleBack = () => {
-    if (hasChanges) setUnsavedAction('back');
-    else router.back();
-  };
-
-  const handleUnsavedDiscard = () => {
-    const action = unsavedAction;
-    setUnsavedAction(null);
-    if (action === 'back') router.back();
-    else navigation.dispatch(action);
-  };
-
-  const handleUnsavedSave = async () => {
-    const action = unsavedAction;
-    setUnsavedAction(null);
-    await handleSave();
-    if (action === 'back') router.back();
-    else navigation.dispatch(action);
-  };
-
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -217,7 +106,7 @@ function SettingsScreen() {
 
       {/* Topbar */}
       <View style={[styles.topBar, { paddingTop: Math.max(40, insets.top + 8) }]}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <FontAwesome name="chevron-left" size={16} color={Palette.accent} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -255,76 +144,6 @@ function SettingsScreen() {
         {preference === 'system' && (
           <Text style={styles.themeHint}>Follows your phone&apos;s light and dark setting.</Text>
         )}
-      </View>
-
-      {/* CATEGORIES */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>What do you do during your pause?</Text>
-        <Text style={styles.sectionSubtitle}>
-          Choose the activities that suit you.
-        </Text>
-        <View style={styles.categoryGrid}>
-          {allCategories.map(cat => (
-            <TouchableOpacity
-              key={cat.id}
-              style={[styles.chip, selectedCategories.includes(cat.id) && styles.chipSelected]}
-              onPress={() => toggleCategory(cat.id)}
-            >
-              <Text style={styles.chipEmoji}>{cat.emoji}</Text>
-              <Text style={[styles.chipLabel, selectedCategories.includes(cat.id) && styles.chipLabelSelected]}>
-                {cat.label}
-              </Text>
-              {customCategories.some(c => c.id === cat.id) && (
-                <TouchableOpacity
-                  onPress={() => removeCustomCategory(cat.id)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <FontAwesome5 name="times" size={10} color={Palette.textFaint} />
-                </TouchableOpacity>
-              )}
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Add custom category */}
-        <View style={styles.addSection}>
-          <Text style={styles.addTitle}>ADD YOUR OWN ACTIVITY:</Text>
-          <View style={styles.addRow}>
-            <View style={styles.emojiWrapper}>
-              <TextInput
-                style={styles.emojiInput}
-                placeholder=""
-                placeholderTextColor={Palette.textDisabled}
-                value={newEmoji}
-                onChangeText={setNewEmoji}
-                maxLength={2}
-                returnKeyType="done"
-                onSubmitEditing={() => Keyboard.dismiss()}
-              />
-              {!newEmoji && (
-                <Entypo name="emoji-happy" size={22} color={Palette.textDisabled} style={styles.emojiOverlay} />
-              )}
-            </View>
-            <TextInput
-              style={styles.labelInput}
-              placeholder="Activity name"
-              placeholderTextColor={Palette.textDisabled}
-              value={newLabel}
-              onChangeText={setNewLabel}
-              autoCapitalize="words"
-              maxLength={20}
-              returnKeyType="done"
-              onSubmitEditing={addCustomCategory}
-            />
-            <TouchableOpacity
-              style={[styles.addButton, (!newEmoji.trim() || !newLabel.trim()) && styles.addButtonDisabled]}
-              onPress={addCustomCategory}
-              disabled={!newEmoji.trim() || !newLabel.trim()}
-            >
-              <FontAwesome5 name="plus" size={16} color={Palette.onAccent} />
-            </TouchableOpacity>
-          </View>
-        </View>
       </View>
 
       {/* PAUSE POD: taggregistrering — samma skärm som lådans QR-kod öppnar */}
@@ -370,34 +189,6 @@ function SettingsScreen() {
           </Text>
         </TouchableOpacity>
       </View>
-
-      {/* Save button */}
-      <TouchableOpacity
-        style={[styles.saveButton, saved && styles.saveButtonDone]}
-        onPress={handleSave}
-      >
-        <Text style={styles.saveText}>
-          {saved ? 'Saved!' : 'Save'}
-        </Text>
-      </TouchableOpacity>
-
-      <Modal visible={!!unsavedAction} transparent animationType="fade" onRequestClose={() => setUnsavedAction(null)}>
-        <View style={styles.unsavedOverlay}>
-          <View style={styles.unsavedSheet}>
-            <Text style={styles.unsavedTitle}>Unsaved changes</Text>
-            <Text style={styles.unsavedBody}>Do you want to save your changes before leaving?</Text>
-            <TouchableOpacity style={styles.unsavedBtnSave} onPress={handleUnsavedSave}>
-              <Text style={styles.unsavedBtnSaveText}>Save</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.unsavedBtnDiscard} onPress={handleUnsavedDiscard}>
-              <Text style={styles.unsavedBtnDiscardText}>Leave without saving</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.unsavedBtnCancel} onPress={() => setUnsavedAction(null)}>
-              <Text style={styles.unsavedBtnCancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
     </DismissKeyboardView>
     </ScrollView>

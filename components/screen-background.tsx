@@ -49,7 +49,7 @@ const SKY: Record<ThemeMode, Record<RoomName, { top: string; bottom: string }>> 
     night: { top: 'rgb(6,12,30)', bottom: 'rgb(5,11,26)' },
   },
   light: {
-    pause: { top: 'rgb(170,200,245)', bottom: 'rgb(46,134,222)' },
+    pause: { top: 'rgb(120,175,245)', bottom: 'rgb(46,134,222)' },
     circle: { top: 'rgb(140,195,215)', bottom: 'rgb(35,132,90)' },
     friends: { top: 'rgb(240,205,175)', bottom: 'rgb(157,85,32)' },
     study: { top: 'rgb(170,200,245)', bottom: 'rgb(46,134,222)' },
@@ -81,6 +81,8 @@ const GLOW_1: Record<ThemeMode, GlowSpec> = {
   light: { color: 'rgb(46,134,222)', opacity: 0.17 },
 };
 const ROOM_GLOW_1: Partial<Record<RoomKey, GlowSpec>> = {
+  // Pause i ljust läge var platt: ett tydligare blått ljus bakom ringen.
+  'light:pause': { color: 'rgb(47,136,224)', opacity: 0.3 },
   'dark:friends': { color: 'rgb(235,160,110)', opacity: 0.17 },
   'light:friends': { color: 'rgb(200,120,60)', opacity: 0.15 },
   // Nattens ljus är det som gör mitten ljusare än kanterna, och är därför
@@ -98,6 +100,16 @@ const ROOM_GLOW_2: Partial<Record<RoomKey, GlowSpec>> = {
   'dark:night': { color: 'rgb(29,58,122)', opacity: 0.25 },
 };
 
+// ── Topp och botten ──
+// En vågrät mörkning uppifrån och nedifrån, på begäran, för Pause-rummet.
+// Vinjetten nedan är en ellips och mörknar mest hörnen; den här ramar in
+// sidan ovanför och under, där topbaren och flikraden står.
+type EdgeSpec = { color: string; top: number; bottom: number };
+const ROOM_EDGES: Partial<Record<RoomKey, EdgeSpec>> = {
+  'dark:pause': { color: 'rgb(2,5,14)', top: 0.55, bottom: 0.6 },
+  'light:pause': { color: 'rgb(10,19,48)', top: 0.16, bottom: 0.2 },
+};
+
 // ── Vinjetten ──────────────────────────────────────────────────────────────
 // Genomskinligt inifrån, glöden som mellanstopp, kantfärgen ytterst. Tre stopp
 // och inte två: utan mellanstoppet går mitten rakt till kanten och ytan blir en
@@ -112,6 +124,8 @@ const VIGNETTE: Record<ThemeMode, VignetteSpec> = {
 // samma skäl som glöden byter: en sval kant runt en varm botten syns som en
 // smutsrand, inte som en skugga.
 const ROOM_VIGNETTE: Partial<Record<RoomKey, VignetteSpec>> = {
+  // En sval kant i navy i stället för plommon, så att den blå ytan får djup.
+  'light:pause': { glow: 'rgb(47,136,224)', glowOpacity: 0.18, edge: 'rgb(10,19,48)', edgeOpacity: 0.16 },
   'dark:friends': { glow: 'rgb(235,160,110)', glowOpacity: 0.14, edge: 'rgb(0,0,0)', edgeOpacity: 0.62 },
   'light:friends': { glow: 'rgb(200,120,60)', glowOpacity: 0.16, edge: 'rgb(80,50,30)', edgeOpacity: 0.18 },
   'dark:night': { glow: 'rgb(15,32,72)', glowOpacity: 0.3, edge: 'rgb(0,0,0)', edgeOpacity: 0.55 },
@@ -172,6 +186,7 @@ export function ScreenBackground({ room }: { room?: RoomName }) {
   const glow1 = ROOM_GLOW_1[roomKey] ?? GLOW_1[mode];
   const glow2 = ROOM_GLOW_2[roomKey] ?? GLOW_2[mode];
   const vignette = ROOM_VIGNETTE[roomKey] ?? VIGNETTE[mode];
+  const edges = ROOM_EDGES[roomKey];
   const bg = roomPalette(mode, active).bg;
 
   // Glöd 1: en cirkel på 330 px vars ruta börjar 30 px utanför vänsterkanten
@@ -237,6 +252,14 @@ export function ScreenBackground({ room }: { room?: RoomName }) {
             <Stop offset={0.72} stopColor={vignette.glow} stopOpacity={vignette.glowOpacity} />
             <Stop offset={1} stopColor={vignette.edge} stopOpacity={vignette.edgeOpacity} />
           </RadialGradient>
+          {edges && (
+            <LinearGradient id="edges" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset={0} stopColor={edges.color} stopOpacity={edges.top} />
+              <Stop offset={0.24} stopColor={edges.color} stopOpacity={0} />
+              <Stop offset={0.72} stopColor={edges.color} stopOpacity={0} />
+              <Stop offset={1} stopColor={edges.color} stopOpacity={edges.bottom} />
+            </LinearGradient>
+          )}
         </Defs>
 
         {/* Ritordningen är lagerordningen: himlen, de två glöden, och
@@ -245,6 +268,7 @@ export function ScreenBackground({ room }: { room?: RoomName }) {
         <Rect x={0} y={0} width={W} height={H} fill="url(#glow1)" />
         <Rect x={0} y={0} width={W} height={H} fill="url(#glow2)" />
         <Rect x={0} y={0} width={W} height={H} fill="url(#vignette)" />
+        {edges && <Rect x={0} y={0} width={W} height={H} fill="url(#edges)" />}
       </Svg>
     </View>
   );

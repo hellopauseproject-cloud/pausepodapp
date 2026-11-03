@@ -79,7 +79,7 @@ export default function LoginScreen() {
       <View style={styles.inner}>
         <View style={styles.logoRow}>
           <FontAwesome name="pause" size={22} color={Palette.accent} />
-          <Text style={styles.logoText}>PAUSE POD</Text>
+          <Text style={styles.logoText}>PAUSEPOD</Text>
         </View>
 
         <View style={styles.header}>

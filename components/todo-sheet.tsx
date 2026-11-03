@@ -45,9 +45,14 @@ import {
 // ska se ut som en post-it. Mörkt läge får en dämpad gul så att lappen inte
 // bländar mot plommon. Bläcket klarar 4.5:1 mot pappret i båda (`inkSoft`
 // 5.1:1).
+// Ett varmt, nästan vitt papper: designsystemets Cream ljusad mot vitt, med
+// Navy-bläck. Neutralt nog att stå i både Pause-rummets blå och Kretsens
+// gröna. Gult drog blicken och fanns ingen annanstans; Ice (blåvitt) krockade
+// med det gröna i ljust läge. I mörkt läge något dämpat, så att lappen inte
+// lyser mot navy.
 const PAPER = {
-  dark: { paper: '#e6cb68', fold: '#c9ae4f', ink: '#3b2f14', inkSoft: 'rgba(59,47,20,0.75)', tape: 'rgba(255,250,235,0.42)' },
-  light: { paper: '#f6dd7a', fold: '#dcc35f', ink: '#3b2f14', inkSoft: 'rgba(59,47,20,0.75)', tape: 'rgba(255,255,255,0.55)' },
+  dark: { paper: '#e7dfd0', fold: '#cdc3b0', ink: '#0a1330', inkSoft: 'rgba(10,19,48,0.7)', tape: 'rgba(255,252,245,0.45)' },
+  light: { paper: '#fbf6ec', fold: '#e8dfcd', ink: '#0a1330', inkSoft: 'rgba(10,19,48,0.7)', tape: 'rgba(255,255,255,0.6)' },
 };
 type Paper = typeof PAPER.dark;
 const usePaper = (): Paper => PAPER[usePalette().mode === 'dark' ? 'dark' : 'light'];
@@ -783,13 +788,13 @@ function Check({ done }: { done: boolean }) {
 // ur `PAPER` och inte ur rummet: bläck och bockar är lappens plommonbruna
 // bläck, och arket har tejp i stället för greppstreck. Plusknappen är det
 // enda ifyllda, och den är accenten, som allt ifyllt i appen.
-// Linjerna och marginalen: ett gult blocks blå och röda. Inte palettstyrda,
-// samma skäl som pappret.
+// Linjerna och marginalen: tunna och neutrala, i bläckets navy, så att de
+// inte tar färg mot något rum. Inte palettstyrda, samma skäl som pappret.
 // Hur långt krysset når ut i marginalen. Under Spacing.xl (24), annars
 // klipps det mot listans nya kant.
 const DELETE_BLEED = 20;
-const RULE = 'rgba(70,110,175,0.30)';
-const MARGIN = 'rgba(205,75,65,0.45)';
+const RULE = 'rgba(10,19,48,0.1)';
+const MARGIN = 'rgba(10,19,48,0.22)';
 
 const makeStyles = (Palette: AppPalette, paper: Paper) => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: Palette.scrim, justifyContent: 'flex-end' },

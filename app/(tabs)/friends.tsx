@@ -125,7 +125,8 @@ const STATUS_MAX_HOURS = 7 * 24;
 function friendStatusText(friend: Friend, sessionMap: SessionMap): string | null {
   if (friend.is_pausing) return 'pausing now';
   const entry = sessionMap[friend.id];
-  if (!friend.show_stats || !entry?.latest?.ended_at) return null;
+  // Pausstatistiken syns alltid för vänner; flaggan show_stats läses inte längre.
+  if (!entry?.latest?.ended_at) return null;
   const minutesAgo = Math.floor(
     (Date.now() - new Date(entry.latest.ended_at).getTime()) / 60000
   );
@@ -470,7 +471,7 @@ const FriendRow = memo(function FriendRow({
       </TouchableOpacity>
 
       <View style={styles.friendActions}>
-        {friend.show_stats && (
+        {(
           <TouchableOpacity
             style={[styles.iconBtn, statsOpen && styles.iconBtnOpen]}
             onPress={() => setStatsOpen(o => !o)}
@@ -509,7 +510,7 @@ const FriendRow = memo(function FriendRow({
         )}
       </View>
     </View>
-    {statsOpen && friend.show_stats && <FriendWeekStats friendId={friend.id} />}
+    {statsOpen && <FriendWeekStats friendId={friend.id} />}
     </View>
   );
 }, (a, b) =>
@@ -1475,10 +1476,10 @@ function FriendsScreen() {
       <View style={styles.header}>
         <View style={styles.logoRow}>
           <FontAwesome name="pause" size={16} color={Palette.hue} />
-          <Text style={styles.logoText}>PAUSE POD</Text>
+          <Text style={styles.logoText}>PAUSEPOD</Text>
         </View>
         <View style={styles.titleWithInbox}>
-          <Text style={styles.title}>Friends</Text>
+          <Text style={styles.title}>FRIENDS</Text>
           <View style={styles.inboxRow}>
             <TouchableOpacity style={styles.inboxBtn} onPress={handleCallChannel} activeOpacity={0.8}>
               <FontAwesome5 name="phone-alt" size={15} color={Palette.hue} />
@@ -1795,7 +1796,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   header: { gap: Spacing.lg },
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   logoText: { fontSize: 13, fontWeight: 'bold', color: Palette.hue, letterSpacing: 4 },
-  title: { fontSize: 32, fontWeight: '800', color: Palette.textPrimary },
+  // Samma rubrik som YOUR PAUSES i statistiken: designsystemets display.
+  title: { fontSize: 26, lineHeight: 30, fontWeight: '900', letterSpacing: -0.6, color: Palette.textPrimary },
 
   // Inkorgen sitter på samma rad som rubriken, längst till höger. Mindre än
   // de 64 px de var på Hem — här är de en detalj bredvid en rubrik, inte

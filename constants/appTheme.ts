@@ -300,11 +300,12 @@ const derive = <T extends typeof darkBase>(p: T) => ({
   // Kulören är rummets och inte `textTertiary`: sektionsrubrikerna är det som
   // säger vilket rum man står i, och de står på varje panel. Utanför flikarna
   // är `hue` accenten, så där blir de blå.
+  // Designsystemets kicker: Arial Black, +0.2em.
   eyebrow: {
     fontSize: 12,
-    fontWeight: '700' as const,
+    fontWeight: '900' as const,
     color: p.hue,
-    letterSpacing: 2,
+    letterSpacing: 2.4,
     textTransform: 'uppercase' as const,
   },
   // Kräver en **opak** bakgrund på ytan den läggs på. Ligger den på ett
@@ -428,10 +429,12 @@ export const roomMode = (mode: ThemeMode, room: RoomName | null): ThemeMode =>
 
 const ROOMS: Record<ThemeMode, Record<RoomName, RoomTokens>> = {
   dark: {
-    pause: { hue: '#5aa6f2', bg: '#101a30', surface: '#1a2744', surfaceAlt: '#223253', sunken: '#0a1120', modalSurface: '#24375c' },
+    // PausePod-designsystemets natt: Navy 900 botten, Navy 800 paneler, Navy 700
+    // linjer, Navy 950 djup och Sky 300 som rummets ljus.
+    pause: { hue: '#9ccbff', bg: '#0a1330', surface: '#111c3f', surfaceAlt: '#1c2b58', sunken: '#060c1d', modalSurface: '#22346a' },
     circle: { hue: '#6cc99a', bg: '#141714', surface: '#1f2420', surfaceAlt: '#28302a', sunken: '#0d0f0d', modalSurface: '#324539' },
     friends: { hue: '#e8a87c', bg: '#1f1613', surface: '#2e211b', surfaceAlt: '#392a21', sunken: '#140e0b', modalSurface: '#4a3628' },
-    study: { hue: '#5aa6f2', bg: '#0b1221', surface: '#131d33', surfaceAlt: '#1b2742', sunken: '#070c17', modalSurface: '#213353' },
+    study: { hue: '#9ccbff', bg: '#0b1221', surface: '#131d33', surfaceAlt: '#1b2742', sunken: '#070c17', modalSurface: '#213353' },
     night: NIGHT,
   },
   light: {

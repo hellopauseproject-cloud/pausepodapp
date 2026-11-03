@@ -136,6 +136,22 @@ export const SUPPORT_REQUEST_TYPE = 'support_request';
 export const SUPPORT_RECEIVED_TYPE = 'support_received';
 export const PAUSE_INVITE_TYPE = 'pause_invite';
 
+/**
+ * Påminnelsen om den globala pausen, 10 minuter före (lib/globalPause.ts).
+ * Lokal som dagspåminnelsen: den läggs ut av ens eget "I'll join", så den kan
+ * inte växa av sig själv och aldrig gälla något man inte valt. Ett fast id,
+ * för man är anmäld till högst en i taget.
+ */
+export const GLOBAL_PAUSE_TYPE = 'global_pause';
+/**
+ * Namnet användaren ser, på ett ställe. Bara orden: filer, tabeller och
+ * funktioner heter fortfarande global_pause.
+ */
+export const GLOBAL_PAUSE_NAME = 'Global Pause';
+const GLOBAL_PAUSE_REMINDER_ID = 'pause-global-reminder';
+const GLOBAL_PAUSE_CHANNEL_ID = 'pause-global-reminder';
+const GLOBAL_PAUSE_REMINDER_LEAD_MS = 10 * 60_000;
+
 /** Alla typer som kommer som push, alltså handlar om någon annan. */
 const PUSH_TYPES = new Set([
   CIRCLE_GOAL_TYPE, CIRCLE_CHAT_TYPE, SUPPORT_REQUEST_TYPE, SUPPORT_RECEIVED_TYPE, PAUSE_INVITE_TYPE,
@@ -410,6 +426,55 @@ export async function syncDailyReminder(): Promise<void> {
     }
   } catch {
     // Tyst med flit. Se doc-kommentaren ovan.
+  }
+}
+
+export async function cancelGlobalPauseReminder(): Promise<void> {
+  try {
+    await Notifications.cancelScheduledNotificationAsync(GLOBAL_PAUSE_REMINDER_ID);
+  } catch {
+    // Ett id som inte finns är inte ett fel.
+  }
+}
+
+/**
+ * Lägger ut påminnelsen när någon trycker *I'll join*. Det är också där
+ * frågan om behörighet ställs: man har just bett om att bli påmind. Kastar
+ * aldrig — en anmälan ska stå sig även om notisen inte gick att lägga ut.
+ * Är det mindre än 10 minuter kvar läggs ingen ut.
+ */
+export async function scheduleGlobalPauseReminder(startsAt: Date): Promise<void> {
+  try {
+    await cancelGlobalPauseReminder();
+    await requestPermission();
+    const permission = await Notifications.getPermissionsAsync();
+    if (!permission.granted) return;
+
+    const fireAt = new Date(startsAt.getTime() - GLOBAL_PAUSE_REMINDER_LEAD_MS);
+    if (fireAt.getTime() <= Date.now()) return;
+
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync(GLOBAL_PAUSE_CHANNEL_ID, {
+        name: `${GLOBAL_PAUSE_NAME} reminder`,
+        importance: Notifications.AndroidImportance.DEFAULT,
+        vibrationPattern: null,
+      });
+    }
+    await Notifications.scheduleNotificationAsync({
+      identifier: GLOBAL_PAUSE_REMINDER_ID,
+      content: {
+        title: `${GLOBAL_PAUSE_NAME} in 10 minutes`,
+        body: 'The room is open.',
+        data: { type: GLOBAL_PAUSE_TYPE },
+        ...(Platform.OS === 'android' ? { channelId: GLOBAL_PAUSE_CHANNEL_ID } : null),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: fireAt,
+      },
+    });
+  } catch {
+    // Tyst med flit, se ovan.
   }
 }
 

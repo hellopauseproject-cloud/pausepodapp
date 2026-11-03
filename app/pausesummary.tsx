@@ -6,6 +6,8 @@ import { Animated, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet
 import { useAuth } from '../contexts/AuthContext';
 import { track } from '../lib/analytics';
 import { setPendingPauseTag } from '../lib/pauseTags';
+import { GlobalPauseResult, takeGlobalPauseResult } from '../lib/globalPause';
+import { GlobalPauseSummary } from '../components/global-pause-summary';
 import { getSharedPausePeople, SharedPausePerson } from '../lib/pauseInvites';
 import { removeCheers, sendCheers } from '../lib/pauseCheers';
 import { getSelectedCategories } from './pauseLogger';
@@ -42,11 +44,39 @@ function PersonFace({ username, avatarUrl, styles }: {
  * provider, och en bakgrund i skalet täcker varje gren skärmen returnerar.
  */
 export default function PauseSummaryRoom() {
+  const { duration, category, sharedSessionId } = useLocalSearchParams<{
+    duration: string; category: string; sharedSessionId: string;
+  }>();
+  const bell = useAudioPlayer(require('../assets/images/Bell.mp3'));
+  // En paus i en Global Pause får sin egen sammanfattning, i rummets stil
+  // (components/global-pause-summary.tsx). `undefined` = inte frågat än, och
+  // då ritas bara botten. En delad paus frågar inte: den har sina personer.
+  const [global, setGlobal] = useState<GlobalPauseResult | null | undefined>(sharedSessionId ? null : undefined);
+  useEffect(() => {
+    if (sharedSessionId) return;
+    takeGlobalPauseResult().then(setGlobal);
+  }, [sharedSessionId]);
+
+  if (global) {
+    return (
+      <RoomProvider room="night">
+        <View style={roomShell}>
+          <ScreenBackground room="night" />
+          <GlobalPauseSummary
+            result={global}
+            seconds={parseInt(duration ?? '0')}
+            hasIntention={!!category}
+            bell={bell}
+          />
+        </View>
+      </RoomProvider>
+    );
+  }
   return (
     <RoomProvider room="pause">
       <View style={roomShell}>
         <ScreenBackground room="pause" />
-        <PauseSummaryScreen />
+        {global === null && <PauseSummaryScreen />}
       </View>
     </RoomProvider>
   );
