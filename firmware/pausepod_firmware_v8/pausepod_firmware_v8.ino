@@ -1727,6 +1727,13 @@ void handleLid() {
   if (lidClosed) {
     if (tellApp) sendBLE("lid_closed");
 
+    // Locket på = klar med lådan. En kvarstående QR-kod försvinner.
+    if (pairHold) {
+      pairHold = false;
+      pairCode[0] = 0;
+      Serial.println("QR-koden borttagen (locket stängt)");
+    }
+
     if (phase == RESPITE) {
       if (sessionOwner == OWNER_TAG && !tagPresent) {
         // Telefonen togs ur och locket stängdes över en tom låda.
