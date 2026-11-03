@@ -16,6 +16,7 @@ import { Category, DEFAULT_CATEGORIES } from './pauseLogger';
 import { AppPalette, alpha } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
+import { lastEmoji } from '../lib/emojiInput';
 
 const CUSTOM_CATEGORIES_PATH = (FileSystem.documentDirectory ?? '') + 'customCategories.json';
 
@@ -177,9 +178,8 @@ function SupportStoryCreateScreen() {
                   <TextInput
                     style={s.emojiInput}
                     value={freeEmoji}
-                    onChangeText={setFreeEmoji}
+                    onChangeText={t => setFreeEmoji(lastEmoji(t))}
                     placeholder=""
-                    maxLength={2}
                     textAlign="center"
                   />
                   {!freeEmoji && (

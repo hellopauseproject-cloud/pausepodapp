@@ -7,6 +7,7 @@ import { Category, DEFAULT_CATEGORIES, saveSelectedCategories } from '../app/pau
 import { AppPalette, Radius, Spacing } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { track } from '../lib/analytics';
+import { lastEmoji } from '../lib/emojiInput';
 
 /**
  * *What do you do during your pause?* — vilka intentioner som erbjuds före och
@@ -110,8 +111,7 @@ export function IntentionSettings() {
             <TextInput
               style={styles.emojiInput}
               value={newEmoji}
-              onChangeText={setNewEmoji}
-              maxLength={2}
+              onChangeText={t => setNewEmoji(lastEmoji(t))}
               returnKeyType="done"
               onSubmitEditing={() => Keyboard.dismiss()}
             />
