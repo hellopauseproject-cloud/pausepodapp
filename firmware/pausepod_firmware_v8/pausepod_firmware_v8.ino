@@ -396,6 +396,18 @@ bool readTagOnce(char* out) {
 
 TagInfo tagInfo = TI_NONE;
 char    tagOwnerName[33] = "";
+
+// QR-koden står kvar när telefonen lyfts. Man måste ju lyfta den för att
+// skanna koden med samma telefon, och förr försvann koden i samma stund.
+// Lådan minns taggen och fortsätter fråga servern tills koden använts,
+// koden gått ut, eller en telefon läggs i igen.
+const unsigned long PAIR_HOLD_MS     = 300000;  // som kodens giltighet på servern
+const unsigned long PAIRED_SHOW_MS   = 4000;    // "HI, NAMN" efter registreringen
+bool          pairHold        = false;
+char          pairHoldUid[21] = "";
+unsigned long pairHoldUntil   = 0;
+unsigned long pairedShownAt   = 0;   // >0 = visa bekräftelsen
+char          pairedName[33]  = "";
 char    pairCode[11] = "";
 char    pairUrl[96] = "";
 unsigned long lastLookupMs = 0;
@@ -1332,6 +1344,22 @@ void renderWifiSetup() {
                 wifiSetupResult == 3 ? "Wrong password?" : "Or join the WiFi:", apName);
 }
 
+// Taggen registrerades medan QR-koden stod kvar.
+void renderPaired() {
+  sprite.fillSprite(BG);
+  drawRing(CENTER_X, 46, 22, 5, GREEN);
+  drawCheck(CENTER_X, 46, 22, 6, 1.0, GREEN);
+  String n = String(pairedName);
+  n.toUpperCase();
+  if (n.length() > 14) n = n.substring(0, 14);
+  String hi = String("HI, ") + n;
+  sprite.setTextDatum(MC_DATUM);
+  fitHeadline(hi, SCREEN_W - 32);
+  drawHeavy(hi, CENTER_X, 100, INK);
+  drawBody("Tag paired. Phone in to start.", CENTER_X, 140, INK_2);
+  sprite.pushSprite(0, 0);
+}
+
 // Inställningen gick igenom.
 void renderWifiOk() {
   sprite.fillSprite(BG);
@@ -1359,6 +1387,13 @@ bool qrNeedsDraw(const char* key) {
 
 void renderIdle() {
   if (!tagPresent || tagInfo == TI_NONE) {
+    if (pairedShownAt != 0) { lastDrawnQr[0] = 0; renderPaired(); return; }
+    if (pairHold && pairCode[0]) {
+      char key[24];
+      snprintf(key, sizeof(key), "pair:%s", pairCode);   // samma nyckel: ingen omritning vid lyftet
+      if (qrNeedsDraw(key)) renderPairing();
+      return;
+    }
     if (wifiSetupResult == 2 && wifiOkShownAt != 0) { lastDrawnQr[0] = 0; renderWifiOk(); return; }
     if (portalActive && !wifiUp) {
       char key[48];
@@ -1728,6 +1763,8 @@ void handleLid() {
 
 void onTagArrived() {
   Serial.printf("Tagg: %s\n", tagUid);
+  pairHold = false;        // en telefon i lådan går före en kvarstående QR-kod
+  pairedShownAt = 0;
   tagInfo = TI_PENDING;
   tagOwnerName[0] = 0;
   pairCode[0] = 0;
@@ -1739,6 +1776,16 @@ void onTagGone() {
   startWhenKnown = false;
   // Under en NFC-paus med öppet lock = telefonen lyftes ur → klar.
   if (phase == RESPITE && sessionOwner == OWNER_TAG) endSession(true);
+  // Okänd tagg: låt QR-koden stå kvar så att den går att skanna.
+  if (phase == IDLE && tagInfo == TI_UNKNOWN && pairCode[0]) {
+    pairHold = true;
+    strncpy(pairHoldUid, tagUid, sizeof(pairHoldUid));
+    pairHoldUntil = millis() + PAIR_HOLD_MS;
+    Serial.println("QR-koden står kvar medan någon skannar");
+    tagInfo = TI_NONE;
+    tagOwnerName[0] = 0;
+    return;   // pairCode och pairUrl behålls
+  }
   tagInfo = TI_NONE;
   tagOwnerName[0] = 0;
   pairCode[0] = 0;
@@ -1802,6 +1849,21 @@ void handleLookup() {
     strncpy(url, lookupUrl, sizeof(url));
     xSemaphoreGive(netMutex);
 
+    // Svar för den kvarstående QR-koden: har någon registrerat taggen?
+    if (!tagPresent && pairHold && strcmp(uid, pairHoldUid) == 0) {
+      if (ok && strcmp(status, "known") == 0) {
+        pairHold = false;
+        pairCode[0] = 0;
+        strncpy(pairedName, name, sizeof(pairedName));
+        pairedShownAt = now;
+        Serial.printf("Taggen registrerad: %s\n", pairedName);
+      } else if (ok && strcmp(status, "unknown") == 0) {
+        strncpy(pairCode, code, sizeof(pairCode));   // en ny kod om den gamla gått ut
+        strncpy(pairUrl, url, sizeof(pairUrl));
+      }
+      // Inget svar: koden står kvar, nästa fråga om en stund.
+    }
+
     // Svar för en tagg som inte längre ligger där → släng.
     if (tagPresent && strcmp(uid, tagUid) == 0) {
       if (!ok) {
@@ -1826,6 +1888,18 @@ void handleLookup() {
       }
     }
   }
+
+  // Den kvarstående QR-koden: släpp den när tiden gått ut eller lådan börjat
+  // något annat, och fråga annars servern med jämna mellanrum.
+  if (pairHold && (phase != IDLE || (long)(now - pairHoldUntil) >= 0)) {
+    pairHold = false;
+    pairCode[0] = 0;
+    Serial.println("QR-koden borttagen");
+  }
+  if (pairHold && !tagPresent && !lookupRequested && now - lastLookupMs > PAIR_POLL_MS) {
+    requestLookup(pairHoldUid);
+  }
+  if (pairedShownAt != 0 && now - pairedShownAt > PAIRED_SHOW_MS) pairedShownAt = 0;
 
   // Fråga igen: QR visas (har någon registrerat taggen?) eller nätet var nere.
   if (phase == IDLE && tagPresent && !lookupRequested) {
