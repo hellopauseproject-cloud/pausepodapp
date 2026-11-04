@@ -1205,11 +1205,60 @@ String formatDuration(uint64_t ms) {
   return String(buf);
 }
 
+// Batterinivån ur spänningen. En LiPo är inte linjär: den ligger länge runt
+// 3,7–3,9 V och faller sedan snabbt, så en rak linje 3,3–4,2 V visade 20 %
+// när batteriet i själva verket nästan var tomt. Tabellen är en vanlig
+// urladdningskurva för en cell; spänningen mäts genom kortets 2:1-delare.
+// Med USB-C i ligger laddspänningen på och nivån visar nära 100 %.
 int batteryPercent() {
-  int raw = analogRead(BATTERY_ADC_PIN);
-  float v = (raw / 4095.0) * 2.0 * 3.3;
-  int pct = (int)(((v - 3.30) / (4.20 - 3.30)) * 100.0);
-  return constrain(pct, 0, 100);
+  float v = analogReadMilliVolts(BATTERY_ADC_PIN) * 2.0 / 1000.0;
+  const float V[] = {3.30, 3.50, 3.60, 3.65, 3.70, 3.75, 3.80, 3.90, 4.00, 4.10, 4.20};
+  const int   P[] = {   0,    3,    8,   15,   25,   35,   45,   62,   77,   90,  100};
+  if (v <= V[0]) return 0;
+  for (int i = 1; i < 11; i++) {
+    if (v <= V[i]) return P[i - 1] + (int)((v - V[i - 1]) / (V[i] - V[i - 1]) * (P[i] - P[i - 1]));
+  }
+  return 100;
+}
+
+// Batterinivån som skärmen visar. Läses var 20:e sekund och medelvärdesbildas,
+// så att symbolen inte blinkar fram och tillbaka vid 20 %.
+const int BATTERY_LOW_PCT      = 20;   // symbolen syns
+const int BATTERY_CRITICAL_PCT = 10;   // + texten LOW BATTERY
+int shownBatteryPct = 100;
+unsigned long lastBatteryReadMs = 0;
+
+void updateShownBattery() {
+  unsigned long now = millis();
+  if (lastBatteryReadMs != 0 && now - lastBatteryReadMs < 20000) return;
+  int p = batteryPercent();
+  shownBatteryPct = (lastBatteryReadMs == 0) ? p : (shownBatteryPct * 3 + p) / 4;
+  lastBatteryReadMs = now;
+}
+
+// En liten batterisymbol uppe till höger, bara när batteriet börjar ta slut.
+// Honung, designsystemets varma "observera": ingen röd larmfärg, lådan ska
+// inte skrika. Under 10 % får den en rad text bredvid sig.
+void drawBatteryWarning() {
+  if (shownBatteryPct > BATTERY_LOW_PCT) return;
+  const int w = 22, h = 11, x = SCREEN_W - 14 - w, y = 12;
+  sprite.drawRoundRect(x, y, w, h, 3, HONEY);
+  sprite.fillRoundRect(x + w, y + 3, 3, 5, 1, HONEY);   // knoppen
+  int fill = max(2, (int)((w - 4) * shownBatteryPct / 100.0 + 0.5));
+  sprite.fillRect(x + 2, y + 2, fill, h - 4, HONEY);
+  if (shownBatteryPct <= BATTERY_CRITICAL_PCT) {
+    sprite.setTextDatum(MR_DATUM);
+    sprite.setFreeFont(&FreeSansBold9pt7b);
+    sprite.setTextColor(HONEY);
+    sprite.drawString("LOW BATTERY", x - 8, y + h / 2);
+  }
+}
+
+// Alla skärmar lämnas till displayen härigenom, så att batterisymbolen
+// hamnar överst på dem alla.
+void pushFrame() {
+  drawBatteryWarning();
+  sprite.pushSprite(0, 0);
 }
 
 // Namnet i versaler och kortat så att det ryms på en rad.
@@ -1239,7 +1288,7 @@ void renderLogo() {
 
   sprite.setTextDatum(MC_DATUM);
   drawBody("Phone in to start.", CENTER_X, 124, INK_2);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // Taggen läst, servern tillfrågad: märkets staplar turas om att lysa.
@@ -1254,7 +1303,7 @@ void renderChecking() {
 
   sprite.setTextDatum(MC_DATUM);
   drawBody("Checking the tag.", CENTER_X, 122, INK_2);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // Känd tagg: hälsningen och vad som händer härnäst.
@@ -1265,7 +1314,7 @@ void renderHello() {
   fitHeadline(hi, SCREEN_W - 32);
   drawHeavy(hi, CENTER_X, 62, INK);
   drawInstructionPill("LID DOWN TO START", 118, HUE, LINE);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 void renderOffline() {
@@ -1275,7 +1324,7 @@ void renderOffline() {
   sprite.setFreeFont(&FreeSansBold18pt7b);
   drawHeavy("NO CONNECTION", CENTER_X, 98, INK);
   drawBody(portalActive ? "Lift the phone to set up WiFi." : "Trying again.", CENTER_X, 134, INK_2);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // ── QR ──
@@ -1353,7 +1402,7 @@ void renderQrPanel(const char* qrText, const char* kicker, const char* h1, const
       cx += sprite.textWidth(ch) + track;
     }
   }
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // Ny tagg: QR-koden till appen, och koden att skriva in.
@@ -1384,7 +1433,7 @@ void renderPaired() {
   fitHeadline(hi, SCREEN_W - 32);
   drawHeavy(hi, CENTER_X, 100, INK);
   drawBody("Tag paired. Phone in to start.", CENTER_X, 140, INK_2);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // Inställningen gick igenom.
@@ -1396,7 +1445,7 @@ void renderWifiOk() {
   sprite.setFreeFont(&FreeSansBold18pt7b);
   drawHeavy("CONNECTED", CENTER_X, 108, INK);
   drawBody(connectedSsid, CENTER_X, 142, INK_2);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // IDLE visar det taggen säger: inget, kollar, hej, QR eller ingen anslutning.
@@ -1502,7 +1551,7 @@ void renderCheckedIn() {
     if (k > 1.0) k = 1.0;
     drawActiveMark(k);
   }
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // Appens flöde: två steg, och en mätare av två staplar som säger var man är.
@@ -1517,13 +1566,13 @@ void renderAwaitingLid() {
   sprite.setFreeFont(&FreeSansBold24pt7b);
   drawHeavy(phonePlaced ? "LID DOWN." : "PHONE IN.", CENTER_X, 82, INK);
   drawBody(phonePlaced ? "Clock starts then." : "Tag on the mark.", CENTER_X, 132, INK_2);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 void renderActive() {
   sprite.fillSprite(BG);
   drawActiveMark(1.0);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // Locket öppet: klockan står, och fristen rinner ur en rad staplar — en per
@@ -1549,7 +1598,7 @@ void renderRespite() {
     sprite.fillSmoothRoundRect(x + i * (bw + bgap), 102, bw, bh, 2, c);
   }
   drawBody("Lid down to go on.", CENTER_X, 146, INK_2);
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // Klar: tiden, i honung och grädde. Rekordet får en honungsfylld pill med
@@ -1567,7 +1616,7 @@ void renderEnded() {
     sprite.setTextColor(BG);
     sprite.drawString("LONGEST YET", CENTER_X, 128);
   }
-  sprite.pushSprite(0, 0);
+  pushFrame();
 }
 
 // ─── Sessionslogik ──────────────────────────────────────────
@@ -2310,6 +2359,7 @@ void loop() {
   }
 
   handleSleep();
+  updateShownBattery();
 
   if (spriteOK && !screenOff && now - lastFrame >= FRAME_INTERVAL_MS) {
     switch (phase) {
