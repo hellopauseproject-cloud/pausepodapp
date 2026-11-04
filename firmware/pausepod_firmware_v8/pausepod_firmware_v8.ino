@@ -55,6 +55,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <stdarg.h>
+#include "esp_sleep.h"
+#include "driver/rtc_io.h"
 #include "qrcode.h"
 #include "pausepod_types.h"
 #include "secrets.h"
@@ -82,7 +84,7 @@ enum TagInfo : uint8_t { TI_NONE, TI_PENDING, TI_KNOWN, TI_UNKNOWN, TI_OFFLINE }
 
 // ─── Hårdvara ───────────────────────────────────────────────
 
-#define HALL_PIN         1
+#define LID_PIN         1
 #define POWER_PIN        15
 #define BATTERY_ADC_PIN  4
 
@@ -311,9 +313,15 @@ const char* phaseName(Phase p) {
 unsigned long phaseStartMs = 0;
 extern char lastDrawnQr[64];
 
+// Senaste gången något hände: locket, en tagg, appen, inställningssidan, en
+// ny fas. Viloläget räknar från den. Skrivs också från Bluetooth-tråden,
+// därför volatile (en unsigned long skrivs i ett svep på ESP32).
+volatile unsigned long lastActivityMs = 0;
+
 void setPhase(Phase p) {
   phase = p;
   phaseStartMs = millis();
+  lastActivityMs = phaseStartMs;
   lastDrawnQr[0] = 0;   // QR-bilden ritas bara om vid byte — tvinga det här
 }
 
@@ -699,6 +707,7 @@ void sendPortalPage(const String& body) {
 }
 
 void handlePortalRoot() {
+  lastActivityMs = millis();
   String body;
   body += "<p class=\"k\">WiFi setup</p><h1>Connect<br>your box</h1>";
   body += "<p>Choose the WiFi at home. The box saves your pauses through it.</p>";
@@ -727,6 +736,7 @@ void handlePortalRoot() {
 }
 
 void handlePortalSave() {
+  lastActivityMs = millis();
   String ssid = portalServer.arg("ssid2");
   ssid.trim();
   if (ssid.length() == 0) ssid = portalServer.arg("ssid");
@@ -1673,6 +1683,7 @@ class CharCallbacks : public BLECharacteristicCallbacks {
     portEXIT_CRITICAL(&bleValueMux);
     msg.trim();
     Serial.printf("← \"%s\"\n", msg.c_str());
+    lastActivityMs = millis();   // appen vill något: väck skärmen
 
     if (msg.startsWith("session_ack:")) { pendingAckSeq = msg.substring(12).toInt(); return; }
     if (msg.startsWith("phone_down"))   { pendingPhoneDown = true; return; }
@@ -1711,7 +1722,7 @@ void onConnectedHandshake() {
 // ─── Locket ─────────────────────────────────────────────────
 
 void handleLid() {
-  bool raw = digitalRead(HALL_PIN) == LOW;
+  bool raw = digitalRead(LID_PIN) == LOW;
   unsigned long now = millis();
 
   if (raw != lastLidRaw) { lastLidChangeMs = now; lastLidRaw = raw; }
@@ -1719,6 +1730,7 @@ void handleLid() {
   if (raw == lidClosed) return;
 
   lidClosed = raw;
+  lastActivityMs = now;
   // Lock-händelser är appens bara när appen äger (eller kan komma att äga)
   // pausen. Under en NFC-paus, eller på loggan, säger de appen ingenting
   // den ska agera på.
@@ -1770,6 +1782,7 @@ void handleLid() {
 
 void onTagArrived() {
   Serial.printf("Tagg: %s\n", tagUid);
+  lastActivityMs = millis();
   pairHold = false;        // en telefon i lådan går före en kvarstående QR-kod
   pairedShownAt = 0;
   tagInfo = TI_PENDING;
@@ -1780,6 +1793,7 @@ void onTagArrived() {
 
 void onTagGone() {
   Serial.println("Taggen borta");
+  lastActivityMs = millis();
   startWhenKnown = false;
   // Under en NFC-paus med öppet lock = telefonen lyftes ur → klar.
   if (phase == RESPITE && sessionOwner == OWNER_TAG) endSession(true);
@@ -1952,11 +1966,141 @@ void handleUploads() {
 
 // ─── Setup / Loop ───────────────────────────────────────────
 
+// ─── Viloläge ───────────────────────────────────────────────
+//
+// Två nivåer, för att lådan går på batteri:
+//
+// 1. DJUPSÖMN när locket varit stängt i 30 s utan att en paus pågår. Allt
+//    stängs av utom en liten krets som vakar över locksensorn (GPIO 1). När
+//    locket öppnas vaknar lådan och startar om från början: startskärmen
+//    syns inom någon sekund, WiFi och Bluetooth är uppe några sekunder
+//    senare. En paus kan inte startas medan den sover, men den kan inte
+//    heller börja förrän locket öppnats och en telefon lagts i.
+//
+// 2. SKÄRMVILA när locket stått öppet i 5 minuter utan att något hänt.
+//    Bara skärmen och bakgrundsljuset släcks; läsaren, WiFi och Bluetooth
+//    är kvar, så en telefon i lådan, locket eller appen väcker skärmen
+//    direkt. Djupsömn går inte här: med locket öppet finns ingen händelse
+//    att vakna på, och lådan måste kunna se en tagg.
+//
+// Under en pågående paus sover lådan aldrig: klockan går i chipet.
+//
+// GPIO 15 (skärm och batterikrets) hålls PÅ under djupsömnen. Enligt
+// LilyGO-forumet styr den också batterikretsen, och stängdes den av kunde
+// kortet tappa strömmen helt på batteri — då vaknar det aldrig. Skärmen
+// stängs i stället av med sina egna kommandon. Det kostar lite ström, men
+// lådan kan inte råka stänga av sig själv.
+
+#define LCD_BL_PIN 38
+
+const unsigned long SLEEP_LID_CLOSED_MS   = 30000;   // locket stängt, inget händer → djupsömn
+const unsigned long SCREEN_IDLE_MS        = 300000;  // locket öppet, inget händer → skärmvila
+const unsigned long SLEEP_UPLOAD_GRACE_MS = 60000;   // pauser i kön: försök skicka så här länge först
+const unsigned long SLEEP_OFFLINE_START_MS = 120000; // locket stängdes medan servern inte svarat
+
+bool          screenOff      = false;
+unsigned long screenOffSince = 0;
+
+void screenSleep() {
+  tft.writecommand(TFT_DISPOFF);
+  tft.writecommand(TFT_SLPIN);
+  digitalWrite(LCD_BL_PIN, LOW);
+  screenOff = true;
+  screenOffSince = millis();
+  Serial.println("Skärmvila");
+}
+
+void screenWake() {
+  tft.writecommand(TFT_SLPOUT);
+  delay(120);                       // ST7789 behöver 120 ms efter SLPOUT
+  tft.writecommand(TFT_DISPON);
+  digitalWrite(LCD_BL_PIN, HIGH);
+  screenOff = false;
+  lastDrawnQr[0] = 0;               // rita om allt, också en QR-kod
+  Serial.println("Skärmen vaken");
+}
+
+void goToDeepSleep() {
+  Serial.printf("Djupsömn: locket stängt, ingen paus. Vaknar när locket öppnas. Batteri %d%%\n",
+                batteryPercent());
+
+  // Läsaren: mjuk power-down, och RST låg om sladden sitter på GPIO 16
+  // (hård power-down, nästan ingen ström). Sitter RST på 3.3V gör det inget.
+  rfid.PCD_SoftPowerDown();
+  digitalWrite(RC522_RST_PIN, LOW);
+
+  // Skärmen av med egna kommandon, bakgrundsljuset av.
+  tft.writecommand(TFT_DISPOFF);
+  tft.writecommand(TFT_SLPIN);
+  digitalWrite(LCD_BL_PIN, LOW);
+
+  // Håll pinnarnas lägen genom sömnen (annars flyter de och läcker ström).
+  gpio_hold_en((gpio_num_t)LCD_BL_PIN);
+  gpio_hold_en((gpio_num_t)POWER_PIN);
+  gpio_hold_en((gpio_num_t)RC522_RST_PIN);
+  gpio_deep_sleep_hold_en();
+
+  // Vakna när locket öppnas: reed-switchen släpper, GPIO 1 går HIGH.
+  rtc_gpio_pullup_en((gpio_num_t)LID_PIN);
+  rtc_gpio_pulldown_dis((gpio_num_t)LID_PIN);
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)LID_PIN, 1);
+
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  Serial.flush();
+  delay(50);
+  esp_deep_sleep_start();
+}
+
+// Släpper det goToDeepSleep() höll fast. Körs först i setup().
+void releaseSleepHolds() {
+  gpio_deep_sleep_hold_dis();
+  gpio_hold_dis((gpio_num_t)LCD_BL_PIN);
+  gpio_hold_dis((gpio_num_t)POWER_PIN);
+  gpio_hold_dis((gpio_num_t)RC522_RST_PIN);
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+    rtc_gpio_deinit((gpio_num_t)LID_PIN);   // tillbaka till vanlig GPIO
+    Serial.println("Vaknade: locket öppnades");
+  }
+}
+
+// Får lådan sova nu? Bara när den står på startskärmen och inget väntar.
+bool readyForSleep(unsigned long now) {
+  if (phase != IDLE) return false;
+  if (lookupRequested || uploadBusy) return false;   // ett nätverksanrop pågår
+  if (phoneOnPortal()) return false;                 // någon ställer in WiFi
+  if (pairedShownAt != 0) return false;              // "HI, NAMN" står på skärmen
+  return true;
+}
+
+void handleSleep() {
+  unsigned long now = millis();
+  unsigned long idleFor = now - lastActivityMs;
+
+  // Skärmen väcks av all aktivitet efter att den släcktes.
+  if (screenOff && (long)(lastActivityMs - screenOffSince) > 0) screenWake();
+
+  if (!readyForSleep(now)) return;
+
+  if (lidClosed) {
+    if (idleFor < SLEEP_LID_CLOSED_MS) return;
+    // Pauser som väntar på uppladdning: ge nätet en stund först. De ligger
+    // kvar i minnet och skickas efter nästa uppvaknande annars.
+    if (wifiQueueCount > 0 && idleFor < SLEEP_UPLOAD_GRACE_MS) return;
+    // Locket stängdes medan servern inte hunnit svara om taggen: vänta.
+    if (startWhenKnown && idleFor < SLEEP_OFFLINE_START_MS) return;
+    goToDeepSleep();
+  } else if (!screenOff && !tagPresent && !pairHold && idleFor > SCREEN_IDLE_MS) {
+    screenSleep();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
+  releaseSleepHolds();
   pinMode(POWER_PIN, OUTPUT);
   digitalWrite(POWER_PIN, HIGH);
-  pinMode(HALL_PIN, INPUT_PULLUP);
+  pinMode(LID_PIN, INPUT_PULLUP);
 
   tft.init();
   tft.setRotation(1);
@@ -2018,7 +2162,7 @@ void setup() {
   adv->addServiceUUID(SERVICE_UUID);
   adv->start();
 
-  lidClosed  = digitalRead(HALL_PIN) == LOW;
+  lidClosed  = digitalRead(LID_PIN) == LOW;
   lastLidRaw = lidClosed;
   setPhase(IDLE);
 
@@ -2148,7 +2292,9 @@ void loop() {
     lastHeapLog = now;
   }
 
-  if (spriteOK && now - lastFrame >= FRAME_INTERVAL_MS) {
+  handleSleep();
+
+  if (spriteOK && !screenOff && now - lastFrame >= FRAME_INTERVAL_MS) {
     switch (phase) {
       case IDLE:         renderIdle();        break;
       case CHECKED_IN:   renderCheckedIn();   break;
