@@ -384,13 +384,30 @@ bool readerOk() {
   return true;
 }
 
+// Ett slumpat ID (4 byte som börjar på 0x08, enligt ISO 14443-3) är inte en
+// tagg utan en telefon som själv låtsas vara ett NFC-kort, och det byts vid
+// varje läsning. Registrerades ett sådant stod det NEW TAG varje gång
+// telefonen lades i lådan. Pause-taggen (NTAG, börjar på 04) har ett fast ID.
+bool uidIsRandom() {
+  return rfid.uid.size == 4 && rfid.uid.uidByte[0] == 0x08;
+}
+
 // Läser taggen om den ligger på läsaren, även om den lästs nyss (WakeupA
 // väcker också en tagg som satts i HALT efter förra läsningen).
+// Svarar telefonen först läggs den i HALT, och läsaren frågar igen med
+// RequestA, som bara når kort som inte är i HALT — alltså taggen.
 bool readTagOnce(char* out) {
   byte atqa[2];
   byte size = sizeof(atqa);
   if (rfid.PICC_WakeupA(atqa, &size) != MFRC522::STATUS_OK) return false;
   if (!rfid.PICC_ReadCardSerial()) return false;
+  if (uidIsRandom()) {
+    rfid.PICC_HaltA();
+    size = sizeof(atqa);
+    if (rfid.PICC_RequestA(atqa, &size) != MFRC522::STATUS_OK) return false;
+    if (!rfid.PICC_ReadCardSerial()) return false;
+    if (uidIsRandom()) { rfid.PICC_HaltA(); return false; }
+  }
   int n = 0;
   for (byte i = 0; i < rfid.uid.size && n <= 18; i++) {
     n += sprintf(out + n, "%02X", rfid.uid.uidByte[i]);
