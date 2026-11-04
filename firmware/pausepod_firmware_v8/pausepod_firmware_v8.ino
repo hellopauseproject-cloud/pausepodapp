@@ -486,7 +486,7 @@ const unsigned long WIFI_RETRY_MS     = 20000;  // nere: leta igen så här ofta
 // Med inställningsnätet uppe letar lådan mycket mer sällan: sökningen byter
 // radiokanal ett par sekunder, och en mobil som ansluter just då kastas ut
 // ("anslutningen misslyckades"). Så länge en mobil är ansluten letar den inte alls.
-const unsigned long PORTAL_RETRY_MS   = 90000;
+const unsigned long PORTAL_RETRY_MS   = 300000;   // var 90 s; sökningen kastade ut mobiler mitt i anslutningen
 const unsigned long PORTAL_LINGER_MS  = 20000;  // uppkopplad: låt sidan hinna svara
 const unsigned long WIFI_OK_SHOW_MS   = 5000;   // "CONNECTED" på skärmen
 
@@ -725,6 +725,7 @@ void sendPortalPage(const String& body) {
 
 void handlePortalRoot() {
   lastActivityMs = millis();
+  Serial.println("WiFi-sidan: visar inställningssidan");
   String body;
   body += "<p class=\"k\">WiFi setup</p><h1>Connect<br>your box</h1>";
   body += "<p>Choose the WiFi at home. The box saves your pauses through it.</p>";
@@ -785,6 +786,8 @@ void handlePortalForget() {
 // Allt annat (mobilernas egna "finns det internet?"-frågor) skickas till
 // sidan. Det är så sidan dyker upp av sig själv när mobilen ansluter.
 void handlePortalOther() {
+  Serial.printf("WiFi-sidan: mobilen frågade efter %s%s\n",
+                portalServer.hostHeader().c_str(), portalServer.uri().c_str());
   portalServer.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/");
   portalServer.send(302, "text/plain", "");
 }
@@ -801,7 +804,18 @@ void startPortal() {
   // på kollen med sin egen sida, och mobilen visar "Logga in på nätverket".
   const IPAddress apIp(192, 168, 4, 1);
   WiFi.softAPConfig(apIp, apIp, IPAddress(255, 255, 255, 0), IPAddress(192, 168, 4, 2), apIp);
-  WiFi.softAP(apName);
+  static bool eventsAdded = false;
+  if (!eventsAdded) {
+    // Vad som händer när en mobil ansluter, rad för rad i Serial Monitor.
+    // Fastnar det före "fick IP" är det radion; efter, är det sidan.
+    WiFi.onEvent([](WiFiEvent_t e, WiFiEventInfo_t) {
+      if (e == ARDUINO_EVENT_WIFI_AP_STACONNECTED)    Serial.println("WiFi: en mobil anslöt till inställningsnätet");
+      if (e == ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED)   Serial.println("WiFi: mobilen fick IP-adress");
+      if (e == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED) Serial.println("WiFi: mobilen kopplade ner från inställningsnätet");
+    });
+    eventsAdded = true;
+  }
+  WiFi.softAP(apName, nullptr, 1, 0, 4);
   delay(100);
   portalDns.start(53, "*", WiFi.softAPIP());
   if (!portalRoutesAdded) {
