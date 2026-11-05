@@ -2470,7 +2470,8 @@ void loop() {
 
   static unsigned long lastHeapLog = 0;
   if (now - lastHeapLog > HEAP_LOG_MS) {
-    Serial.printf("heap=%u största block=%u fas=%s wifi=%s wifi-kö=%d\n",
+    Serial.printf("batteri=%d%% (%.2f V) heap=%u största block=%u fas=%s wifi=%s wifi-kö=%d\n",
+                  batteryPercent(), analogReadMilliVolts(BATTERY_ADC_PIN) * 2.0 / 1000.0,
                   ESP.getFreeHeap(), ESP.getMaxAllocHeap(), phaseName(phase),
                   wifiUp ? "uppe" : "nere", wifiQueueCount);
     lastHeapLog = now;
