@@ -2088,6 +2088,44 @@ const unsigned long SLEEP_OFFLINE_START_MS = 120000; // locket stängdes medan s
 bool          screenOff      = false;
 unsigned long screenOffSince = 0;
 
+// ── Bakgrundsljusets styrka ──
+//
+// T-Display S3 har en LED-drivare (AW9364) med 16 steg. Steget ställs med
+// korta pulser på GPIO 38 och ligger sedan kvar i drivaren så länge pinnen
+// står hög — också när processorn sover djupt. Därför kan paustecknet lysa
+// nedtonat genom hela pausdvalan: skärmen minns bilden själv, drivaren
+// minns ljuset, och processorn behöver inte vara vaken för någotdera.
+// (PWM med analogWrite fungerar inte i djupsömn, pulserna gör det.)
+const uint8_t BL_STEPS          = 16;
+const uint8_t PAUSE_SCREEN_LEVEL = 2;   // steg av 16 under pausdvalan
+uint8_t blLevel = BL_STEPS;              // tft.init() tänder ljuset fullt
+
+void setBacklightLevel(uint8_t level) {
+  if (level > BL_STEPS) level = BL_STEPS;
+  if (level == 0) {
+    digitalWrite(LCD_BL_PIN, LOW);
+    delay(3);                            // drivaren nollställs efter >2,5 ms låg
+    blLevel = 0;
+    return;
+  }
+  if (blLevel == 0) {
+    digitalWrite(LCD_BL_PIN, HIGH);
+    delayMicroseconds(30);
+    blLevel = BL_STEPS;
+  }
+  int from = BL_STEPS - blLevel;
+  int to   = BL_STEPS - level;
+  int num  = (BL_STEPS + to - from) % BL_STEPS;
+  for (int i = 0; i < num; i++) {
+    digitalWrite(LCD_BL_PIN, LOW);
+    digitalWrite(LCD_BL_PIN, HIGH);
+  }
+  blLevel = level;
+}
+
+// Sätts av hibernatePause(): djupsömnen ska lämna skärmen tänd.
+bool sleepKeepScreen = false;
+
 // ── Pausdvala ──
 //
 // En NFC-paus med stängt lock behöver ingenting förrän locket öppnas: ingen
@@ -2103,6 +2141,10 @@ unsigned long screenOffSince = 0;
 // flertimmarspaus kan skilja någon minut.
 //
 // Appens pauser sover inte: appen behöver Bluetooth hela vägen.
+//
+// Skärmen står kvar under dvalan med paustecknet på nedtonat ljus
+// (PAUSE_SCREEN_LEVEL), så att man ser att pausen pågår. Det drar några mA
+// mot under 1 mA med skärmen av — se setBacklightLevel().
 const unsigned long PAUSE_SLEEP_AFTER_MS = 20000;   // pausmärket syns en stund först
 const uint32_t SLEEP_PAUSE_MAGIC = 0x50415553;     // "PAUS"
 
@@ -2127,7 +2169,7 @@ int64_t rtcNowUs() {
 void screenSleep() {
   tft.writecommand(TFT_DISPOFF);
   tft.writecommand(TFT_SLPIN);
-  digitalWrite(LCD_BL_PIN, LOW);
+  setBacklightLevel(0);
   screenOff = true;
   screenOffSince = millis();
   Serial.println("Skärmvila");
@@ -2137,7 +2179,7 @@ void screenWake() {
   tft.writecommand(TFT_SLPOUT);
   delay(120);                       // ST7789 behöver 120 ms efter SLPOUT
   tft.writecommand(TFT_DISPON);
-  digitalWrite(LCD_BL_PIN, HIGH);
+  setBacklightLevel(BL_STEPS);
   screenOff = false;
   lastDrawnQr[0] = 0;               // rita om allt, också en QR-kod
   Serial.println("Skärmen vaken");
@@ -2151,10 +2193,21 @@ void goToDeepSleep() {
   rfid.PCD_SoftPowerDown();
   digitalWrite(RC522_RST_PIN, LOW);
 
-  // Skärmen av med egna kommandon, bakgrundsljuset av.
-  tft.writecommand(TFT_DISPOFF);
-  tft.writecommand(TFT_SLPIN);
-  digitalWrite(LCD_BL_PIN, LOW);
+  if (sleepKeepScreen) {
+    // Pausdvala: skärmen står kvar med paustecknet och nedtonat ljus. Dess
+    // styrpinnar hålls i viloläge så att inget brus når den under sömnen
+    // (RST låg hade tömt den, CS låg hade kunnat skriva skräp i bilden).
+    const int lcdPins[] = {TFT_CS, TFT_RST, TFT_WR, TFT_RD, TFT_DC};
+    for (int p : lcdPins) {
+      digitalWrite(p, HIGH);
+      gpio_hold_en((gpio_num_t)p);
+    }
+  } else {
+    // Skärmen av med egna kommandon, bakgrundsljuset av.
+    tft.writecommand(TFT_DISPOFF);
+    tft.writecommand(TFT_SLPIN);
+    setBacklightLevel(0);
+  }
 
   // Håll pinnarnas lägen genom sömnen (annars flyter de och läcker ström).
   gpio_hold_en((gpio_num_t)LCD_BL_PIN);
@@ -2180,6 +2233,8 @@ void releaseSleepHolds() {
   gpio_hold_dis((gpio_num_t)LCD_BL_PIN);
   gpio_hold_dis((gpio_num_t)POWER_PIN);
   gpio_hold_dis((gpio_num_t)RC522_RST_PIN);
+  const int lcdPins[] = {TFT_CS, TFT_RST, TFT_WR, TFT_RD, TFT_DC};
+  for (int p : lcdPins) gpio_hold_dis((gpio_num_t)p);
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
     rtc_gpio_deinit((gpio_num_t)LID_PIN);   // tillbaka till vanlig GPIO
     Serial.println("Vaknade: locket öppnades");
@@ -2193,6 +2248,10 @@ void hibernatePause() {
   sleepPause.sleptAtUs = rtcNowUs();
   strncpy(sleepPause.tagUid, sessionTagUid, sizeof(sleepPause.tagUid));
   sleepPause.magic     = SLEEP_PAUSE_MAGIC;
+  // Paustecknet står kvar, nedtonat, genom hela sömnen.
+  renderActive();
+  setBacklightLevel(PAUSE_SCREEN_LEVEL);
+  sleepKeepScreen = true;
   Serial.printf("Pausdvala: session %lu, %lu ms hittills\n",
                 (unsigned long)activeSeq, (unsigned long)sleepPause.accumMs);
   goToDeepSleep();
@@ -2278,6 +2337,11 @@ void setup() {
   pinMode(LID_PIN, INPUT_PULLUP);
 
   tft.init();
+  // Ur pausdvalan står drivaren kvar på det nedtonade steget (pinnen var hög
+  // hela sömnen). Nollställ den och tänd fullt.
+  blLevel = 1;
+  setBacklightLevel(0);
+  setBacklightLevel(BL_STEPS);
   tft.setRotation(1);
   initColors();
   tft.fillScreen(BG);
