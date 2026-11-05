@@ -7,6 +7,20 @@ Detta dokument är destillerat ur den källkoden (inte ur någon separat spec) �
 vid osäkerhet, läs `.ino`-filen igen istället för att lita på det här dokumentet
 om de skulle divergera efter en firmware-uppdatering.
 
+> **v8 finns** ([firmware/pausepod_firmware_v8/](firmware/pausepod_firmware_v8/pausepod_firmware_v8.ino)):
+> v7 plus NFC-taggen och WiFi, utan tumplattor. Lådan kan starta en paus
+> **själv** — registrerad Pause-tagg i lådan + locket stängs — och sparar den
+> via WiFi (edge-funktionen `box-session` → `record_box_session()` i
+> [supabase/box_sessions_nfc.sql](supabase/box_sessions_nfc.sql), som också
+> räknar in pausen i kretsen och dagsmålet). En sådan paus syns aldrig över
+> Bluetooth: `state` rapporteras som `idle` och varken `lid_*` eller
+> `session_*` skickas, annars hade appen sparat den en gång till.
+> Appens flöde nedan (`set_mode` → `phone_down` → locket → `phone_up`) finns
+> kvar i v8, med en skillnad: utan tummar skickas `checkin_complete` och
+> `session_started` direkt när locket stängs. Taggregistreringen (QR-koden)
+> står i [lib/tagPairing.ts](lib/tagPairing.ts) och
+> [supabase/tag_pairing.sql](supabase/tag_pairing.sql).
+
 ## Grundprincip
 
 Appen startar ritualen, lådan äger den sedan hela vägen och producerar alla
