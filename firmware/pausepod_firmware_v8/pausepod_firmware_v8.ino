@@ -56,6 +56,7 @@
 #include <ArduinoJson.h>
 #include <stdarg.h>
 #include "esp_sleep.h"
+#include <sys/time.h>
 #include "driver/rtc_io.h"
 #include "qrcode.h"
 #include "pausepod_types.h"
@@ -1833,6 +1834,7 @@ void handleLid() {
       } else {
         sessionSegmentMs = millis();
         setPhase(ACTIVE);
+        rfid.PCD_AntennaOff();   // spar ström tills locket öppnas igen
       }
     } else if (phase == AWAITING_LID) {
       // Appens paus: inga tummar längre, så locket är incheckningen.
@@ -1853,6 +1855,8 @@ void handleLid() {
     if (sessionRunning()) {
       sessionAccumMs += millis() - sessionSegmentMs;
       respiteStartMs = millis();
+      rfid.PCD_AntennaOn();
+      tagLastSeenMs = millis();   // ge läsaren en stund att se taggen igen
       setPhase(RESPITE);
     }
   }
@@ -1894,6 +1898,9 @@ void onTagGone() {
 
 void pollTag() {
   unsigned long now = millis();
+  // Locket stängt under en paus: telefonen kan inte tas ur, så läsaren vilar
+  // med antennen avslagen (se handleLid). Taggen räknas som kvar.
+  if (phase == ACTIVE && lidClosed) return;
   if (now - lastReaderCheckMs > READER_CHECK_MS) {
     lastReaderCheckMs = now;
     if (!readerOk()) {
@@ -2081,6 +2088,42 @@ const unsigned long SLEEP_OFFLINE_START_MS = 120000; // locket stängdes medan s
 bool          screenOff      = false;
 unsigned long screenOffSince = 0;
 
+// ── Pausdvala ──
+//
+// En NFC-paus med stängt lock behöver ingenting förrän locket öppnas: ingen
+// tittar på skärmen, telefonen kan inte tas ur, och pausen laddas upp först
+// när den är slut. Därför sover lådan i djupsömn också under pausen. Tiden
+// räknas med chippets RTC-klocka, som går genom djupsömnen; pausens läge
+// sparas i RTC-minnet (överlever djupsömn, inte strömavbrott — för det finns
+// NVS-checkpointen, som skrivs innan lådan somnar).
+//
+// När locket öppnas vaknar lådan, räknar ihop tiden och går direkt till
+// ON HOLD, som om den varit vaken hela tiden. Lyfts telefonen ur slutar
+// pausen som vanligt. RTC-klockan kan dra sig någon procent, så en
+// flertimmarspaus kan skilja någon minut.
+//
+// Appens pauser sover inte: appen behöver Bluetooth hela vägen.
+const unsigned long PAUSE_SLEEP_AFTER_MS = 20000;   // pausmärket syns en stund först
+const uint32_t SLEEP_PAUSE_MAGIC = 0x50415553;     // "PAUS"
+
+struct SleepPause {
+  uint32_t magic;
+  uint32_t seq;
+  uint32_t accumMs;
+  int64_t  sleptAtUs;
+  char     tagUid[21];
+};
+RTC_DATA_ATTR SleepPause sleepPause = {0, 0, 0, 0, ""};
+
+bool          restoredFromPauseSleep = false;
+unsigned long restoredAtMs           = 0;
+
+int64_t rtcNowUs() {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  return (int64_t)tv.tv_sec * 1000000LL + tv.tv_usec;
+}
+
 void screenSleep() {
   tft.writecommand(TFT_DISPOFF);
   tft.writecommand(TFT_SLPIN);
@@ -2101,8 +2144,7 @@ void screenWake() {
 }
 
 void goToDeepSleep() {
-  Serial.printf("Djupsömn: locket stängt, ingen paus. Vaknar när locket öppnas. Batteri %d%%\n",
-                batteryPercent());
+  Serial.printf("Djupsömn. Vaknar när locket öppnas. Batteri %d%%\n", batteryPercent());
 
   // Läsaren: mjuk power-down, och RST låg om sladden sitter på GPIO 16
   // (hård power-down, nästan ingen ström). Sitter RST på 3.3V gör det inget.
@@ -2144,6 +2186,41 @@ void releaseSleepHolds() {
   }
 }
 
+void hibernatePause() {
+  checkpoint();                       // om batteriet skulle dö under sömnen
+  sleepPause.seq       = activeSeq;
+  sleepPause.accumMs   = elapsedMs();
+  sleepPause.sleptAtUs = rtcNowUs();
+  strncpy(sleepPause.tagUid, sessionTagUid, sizeof(sleepPause.tagUid));
+  sleepPause.magic     = SLEEP_PAUSE_MAGIC;
+  Serial.printf("Pausdvala: session %lu, %lu ms hittills\n",
+                (unsigned long)activeSeq, (unsigned long)sleepPause.accumMs);
+  goToDeepSleep();
+}
+
+// Körs sist i setup() när lådan vaknade ur pausdvalan: tillbaka till pausen,
+// med locket öppet alltså ON HOLD.
+void restorePauseFromSleep() {
+  int64_t sleptMs = (rtcNowUs() - sleepPause.sleptAtUs) / 1000;
+  if (sleptMs < 0) sleptMs = 0;
+  sessionOwner = OWNER_TAG;
+  activeSeq    = sleepPause.seq;
+  strncpy(sessionTagUid, sleepPause.tagUid, sizeof(sessionTagUid));
+  sessionAccumMs = sleepPause.accumMs + (uint32_t)sleptMs;
+  sleepPause.magic = 0;
+  restoredFromPauseSleep = true;
+  restoredAtMs = millis();
+  if (lidClosed) {                    // väckt på annat sätt med locket stängt
+    sessionSegmentMs = millis();
+    setPhase(ACTIVE);
+  } else {
+    respiteStartMs = millis();
+    setPhase(RESPITE);
+  }
+  Serial.printf("Vaknade ur pausdvalan: session %lu, sov %lld s, %lu ms totalt\n",
+                (unsigned long)activeSeq, sleptMs / 1000, (unsigned long)sessionAccumMs);
+}
+
 // Får lådan sova nu? Bara när den står på startskärmen och inget väntar.
 bool readyForSleep(unsigned long now) {
   if (phase != IDLE) return false;
@@ -2156,6 +2233,24 @@ bool readyForSleep(unsigned long now) {
 void handleSleep() {
   unsigned long now = millis();
   unsigned long idleFor = now - lastActivityMs;
+
+  // Efter pausdvalan: läsaren hann inte se taggen före lyftet → telefonen
+  // togs ur direkt när locket öppnades. Samma sak som att lyfta den ur.
+  if (restoredFromPauseSleep) {
+    if (tagPresent || phase != RESPITE) restoredFromPauseSleep = false;
+    else if (now - restoredAtMs > 3000) {
+      restoredFromPauseSleep = false;
+      Serial.println("Ingen tagg efter uppvaknandet: telefonen lyftes ur");
+      endSession(true);
+      return;
+    }
+  }
+
+  // Pausdvala: NFC-paus, stängt lock, pausmärket har synts en stund.
+  if (phase == ACTIVE && sessionOwner == OWNER_TAG && lidClosed &&
+      now - phaseStartMs > PAUSE_SLEEP_AFTER_MS && !uploadBusy && !lookupRequested) {
+    hibernatePause();
+  }
 
   // Skärmen väcks av all aktivitet efter att den släcktes.
   if (screenOff && (long)(lastActivityMs - screenOffSince) > 0) screenWake();
@@ -2213,7 +2308,14 @@ void setup() {
   Serial.printf("Heap efter sprite: %u byte fri\n", ESP.getFreeHeap());
 
   loadPersisted();
-  recoverCheckpoint();
+  // Vaknade lådan ur pausdvalan fortsätter pausen, och checkpointen är
+  // bara en reserv (endSession tar bort den). Annars: vanlig återställning.
+  bool resumePause = false;
+  if (sleepPause.magic == SLEEP_PAUSE_MAGIC) {
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) resumePause = true;
+    else sleepPause.magic = 0;
+  }
+  if (!resumePause) recoverCheckpoint();
   loadWifiSaved();
   // Inställningsnätet heter efter lådans chip, t.ex. PausePod-A7AC.
   snprintf(apName, sizeof(apName), "PausePod-%s",
@@ -2245,6 +2347,7 @@ void setup() {
   lidClosed  = digitalRead(LID_PIN) == LOW;
   lastLidRaw = lidClosed;
   setPhase(IDLE);
+  if (resumePause) restorePauseFromSleep();
 
   Serial.printf("Pause Pod v8 redo. låda=%s ble_id=%s seq=%lu wifi-kö=%d heap=%u största block=%u\n",
                 BOX_ID, boxIdBle.c_str(), (unsigned long)nextSeq, wifiQueueCount,
@@ -2312,6 +2415,7 @@ void loop() {
 
   if (phase == CHECKED_IN && now - phaseStartMs > CER_END) {
     setPhase(ACTIVE);
+    if (lidClosed) rfid.PCD_AntennaOff();
   }
 
   if (phase == ENDED && now - phaseStartMs > ENDED_SHOW_MS) {
@@ -2380,7 +2484,13 @@ void loop() {
       case IDLE:         renderIdle();        break;
       case CHECKED_IN:   renderCheckedIn();   break;
       case AWAITING_LID: renderAwaitingLid(); break;
-      case ACTIVE:       renderActive();      break;
+      case ACTIVE:
+        // Stillbild: rita en gång per fas, inte 30 gånger i sekunden.
+        if (strcmp(lastDrawnQr, "active") != 0) {
+          renderActive();
+          strcpy(lastDrawnQr, "active");
+        }
+        break;
       case RESPITE:      renderRespite();     break;
       case ENDED:        renderEnded();       break;
       default:           renderActive();      break;   // STATS/CHECKING_IN/… nås inte längre
