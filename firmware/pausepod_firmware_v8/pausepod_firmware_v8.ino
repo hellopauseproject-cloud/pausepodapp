@@ -2421,7 +2421,11 @@ const char* sleepBlocker(unsigned long now) {
   if (phase != IDLE) return "inte på startskärmen";
   if (lookupRequested) return "frågar servern om en tagg";
   if (uploadBusy) return "skickar en paus";
-  if (phoneOnPortal()) return "någon är på WiFi-sidan";
+  // En mobil på inställningsnätet håller bara lådan vaken medan locket är
+  // öppet. Mobiler ansluter av sig själva till ett öppet nät de varit på
+  // förut, och då stod lådan med WiFi-nätet uppe hela natten med stängt lock
+  // och tömde batteriet. Med locket stängt ställer ingen in WiFi.
+  if (phoneOnPortal() && !lidClosed) return "en mobil är på WiFi-inställningsnätet";
   if (pairedShownAt != 0) return "visar HI, NAMN";
   return nullptr;
 }
