@@ -2689,8 +2689,15 @@ void loop() {
 
   static unsigned long lastHeapLog = 0;
   if (now - lastHeapLog > HEAP_LOG_MS) {
-    Serial.printf("batteri=%d%% (%.2f V) heap=%u största block=%u fas=%s wifi=%s wifi-kö=%d sover inte: %s\n",
-                  batteryPercent(), batteryMv() / 1000.0,
+    // Över 4,35 V kan ingen LiPo ligga: då läser kortet USB-laddarens egen
+    // spänning, alltså är batteriet inte inkopplat (lös skarv eller ett
+    // batteri som skyddskretsen kopplat bort).
+    uint16_t mv = batteryMv();
+    char batt[28];
+    if (mv > 4350) snprintf(batt, sizeof(batt), "INGEN BATTERIKONTAKT?");
+    else snprintf(batt, sizeof(batt), "%d%%", batteryPercent());
+    Serial.printf("batteri=%s (%.2f V) heap=%u största block=%u fas=%s wifi=%s wifi-kö=%d sover inte: %s\n",
+                  batt, mv / 1000.0,
                   ESP.getFreeHeap(), ESP.getMaxAllocHeap(), phaseName(phase),
                   wifiUp ? "uppe" : "nere", wifiQueueCount, sleepWhyNot);
     lastHeapLog = now;
