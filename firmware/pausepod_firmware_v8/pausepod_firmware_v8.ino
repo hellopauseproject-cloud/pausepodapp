@@ -2186,7 +2186,9 @@ void screenWake() {
 }
 
 void goToDeepSleep() {
-  Serial.printf("Djupsömn. Vaknar när locket öppnas. Batteri %d%%\n", batteryPercent());
+  Serial.printf("Djupsömn. Vaknar när locket öppnas. Batteri %d%% (%.2f V), vaken %lu s\n",
+                batteryPercent(), batteryMv() / 1000.0, millis() / 1000);
+  diagAdd(sleepKeepScreen ? 2 : 1, 0, 0);
 
   // Läsaren: mjuk power-down, och RST låg om sladden sitter på GPIO 16
   // (hård power-down, nästan ingen ström). Sitter RST på 3.3V gör det inget.
@@ -2213,6 +2215,10 @@ void goToDeepSleep() {
   gpio_hold_en((gpio_num_t)LCD_BL_PIN);
   gpio_hold_en((gpio_num_t)POWER_PIN);
   gpio_hold_en((gpio_num_t)RC522_RST_PIN);
+  // Läsarens chip select hög: avmarkerad, så att brus på SPI-ledningarna
+  // inte kan tas för kommandon medan lådan sover.
+  digitalWrite(RC522_SS_PIN, HIGH);
+  gpio_hold_en((gpio_num_t)RC522_SS_PIN);
   gpio_deep_sleep_hold_en();
 
   // Vakna när locket öppnas: reed-switchen släpper, GPIO 1 går HIGH.
@@ -2233,6 +2239,7 @@ void releaseSleepHolds() {
   gpio_hold_dis((gpio_num_t)LCD_BL_PIN);
   gpio_hold_dis((gpio_num_t)POWER_PIN);
   gpio_hold_dis((gpio_num_t)RC522_RST_PIN);
+  gpio_hold_dis((gpio_num_t)RC522_SS_PIN);
   const int lcdPins[] = {TFT_CS, TFT_RST, TFT_WR, TFT_RD, TFT_DC};
   for (int p : lcdPins) gpio_hold_dis((gpio_num_t)p);
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
@@ -2280,13 +2287,143 @@ void restorePauseFromSleep() {
                 (unsigned long)activeSeq, sleptMs / 1000, (unsigned long)sessionAccumMs);
 }
 
+// ── Sömnloggen ──
+//
+// Varje start och varje insomning skrivs till NVS (överlever både djupsömn
+// och strömavbrott), de senaste DIAG_N. Loggen skrivs ut vid varje start och
+// när man skriver "logg" i Serial Monitor. Den visar om lådan verkligen sov,
+// hur länge den var vaken mellan gångerna, vad som väckte den, och hur
+// batteriet sjönk — det enda sättet att se i efterhand vad som hände under
+// en natt ingen tittade.
+const int DIAG_N = 40;
+DiagEntry diagLog[DIAG_N];
+int       diagHead  = 0;      // nästa plats att skriva
+int       diagCount = 0;
+uint32_t  bootNo    = 0;
+const char* sleepWhyNot = "";
+
+uint16_t batteryMv() {
+  return (uint16_t)(analogReadMilliVolts(BATTERY_ADC_PIN) * 2);
+}
+
+void diagLoad() {
+  bootNo    = prefs.getUInt("dg_boot", 0);
+  diagHead  = prefs.getInt("dg_head", 0);
+  diagCount = prefs.getInt("dg_count", 0);
+  if (diagHead < 0 || diagHead >= DIAG_N || diagCount < 0 || diagCount > DIAG_N) {
+    diagHead = 0; diagCount = 0;
+  }
+  if (diagCount > 0 && prefs.getBytes("dg_data", diagLog, sizeof(diagLog)) != sizeof(diagLog)) {
+    diagHead = 0; diagCount = 0;
+  }
+}
+
+void diagAdd(uint8_t kind, uint8_t reason, uint8_t wake) {
+  DiagEntry& e = diagLog[diagHead];
+  e.boot    = bootNo;
+  e.rtcS    = (uint32_t)(rtcNowUs() / 1000000LL);
+  e.awakeMs = millis();
+  e.mv      = batteryMv();
+  e.kind    = kind;
+  e.reason  = reason;
+  e.wake    = wake;
+  e.lid     = (digitalRead(LID_PIN) == LOW) ? 1 : 0;
+  diagHead = (diagHead + 1) % DIAG_N;
+  if (diagCount < DIAG_N) diagCount++;
+  prefs.putBytes("dg_data", diagLog, sizeof(diagLog));
+  prefs.putInt("dg_head", diagHead);
+  prefs.putInt("dg_count", diagCount);
+}
+
+const char* resetReasonName(uint8_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "strömmen på";
+    case ESP_RST_EXT:       return "extern reset";
+    case ESP_RST_SW:        return "omstart i koden";
+    case ESP_RST_PANIC:     return "KRASCH";
+    case ESP_RST_INT_WDT:   return "HÄNGDE (int-wdt)";
+    case ESP_RST_TASK_WDT:  return "HÄNGDE (task-wdt)";
+    case ESP_RST_WDT:       return "HÄNGDE (wdt)";
+    case ESP_RST_DEEPSLEEP: return "ur djupsömn";
+    case ESP_RST_BROWNOUT:  return "BATTERIET FÖR SVAGT";
+    case ESP_RST_USB:       return "USB-reset (uppladdning)";
+    default:                return "okänd";
+  }
+}
+
+const char* wakeName(uint8_t w) {
+  switch (w) {
+    case ESP_SLEEP_WAKEUP_EXT0:      return "locket öppnades";
+    case ESP_SLEEP_WAKEUP_TIMER:     return "timer";
+    case ESP_SLEEP_WAKEUP_UNDEFINED: return "-";
+    default:                         return "annat";
+  }
+}
+
+void printDuration(uint32_t s) {
+  if (s >= 3600) Serial.printf("%lu h %02lu min", (unsigned long)(s / 3600), (unsigned long)(s % 3600 / 60));
+  else if (s >= 60) Serial.printf("%lu min %02lu s", (unsigned long)(s / 60), (unsigned long)(s % 60));
+  else Serial.printf("%lu s", (unsigned long)s);
+}
+
+void diagPrint() {
+  uint32_t nowS = (uint32_t)(rtcNowUs() / 1000000LL);
+  Serial.println();
+  Serial.println("════════ Sömnloggen (äldst först) ════════");
+  Serial.println("Tid = hur länge sedan, räknat på RTC-klockan. Klockan nollas när strömmen");
+  Serial.println("bryts helt, så rader före ett strömavbrott har ingen tid.");
+  int start = (diagHead - diagCount + DIAG_N) % DIAG_N;
+  for (int i = 0; i < diagCount; i++) {
+    const DiagEntry& e = diagLog[(start + i) % DIAG_N];
+    Serial.printf("#%-4lu ", (unsigned long)e.boot);
+    if (e.rtcS <= nowS) { printDuration(nowS - e.rtcS); Serial.print(" sedan"); }
+    else Serial.print("(före strömavbrott)");
+    Serial.printf("  %.2f V  lock %s  ", e.mv / 1000.0, e.lid ? "stängt" : "öppet");
+    if (e.kind == 0) {
+      Serial.printf("START: %s", resetReasonName(e.reason));
+      if (e.reason == ESP_RST_DEEPSLEEP) Serial.printf(" (%s)", wakeName(e.wake));
+    } else {
+      Serial.print(e.kind == 2 ? "PAUSDVALA efter " : "SOMNADE efter ");
+      printDuration(e.awakeMs / 1000);
+      Serial.print(" vaken");
+    }
+    Serial.println();
+  }
+  Serial.println("Skriv \"logg\" för att visa igen, \"rensa\" för att tömma.");
+  Serial.println("══════════════════════════════════════════");
+  Serial.println();
+}
+
+void handleSerialCommand() {
+  static char buf[16];
+  static int  len = 0;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\r' || c == '\n') {
+      buf[len] = 0;
+      if (strcmp(buf, "logg") == 0) diagPrint();
+      else if (strcmp(buf, "rensa") == 0) {
+        diagHead = 0; diagCount = 0;
+        prefs.putInt("dg_head", 0);
+        prefs.putInt("dg_count", 0);
+        Serial.println("Sömnloggen tömd");
+      }
+      len = 0;
+    } else if (len < (int)sizeof(buf) - 1) {
+      buf[len++] = c;
+    }
+  }
+}
+
 // Får lådan sova nu? Bara när den står på startskärmen och inget väntar.
-bool readyForSleep(unsigned long now) {
-  if (phase != IDLE) return false;
-  if (lookupRequested || uploadBusy) return false;   // ett nätverksanrop pågår
-  if (phoneOnPortal()) return false;                 // någon ställer in WiFi
-  if (pairedShownAt != 0) return false;              // "HI, NAMN" står på skärmen
-  return true;
+// Svarar med skälet om den inte får det (syns i statusraden), annars nullptr.
+const char* sleepBlocker(unsigned long now) {
+  if (phase != IDLE) return "inte på startskärmen";
+  if (lookupRequested) return "frågar servern om en tagg";
+  if (uploadBusy) return "skickar en paus";
+  if (phoneOnPortal()) return "någon är på WiFi-sidan";
+  if (pairedShownAt != 0) return "visar HI, NAMN";
+  return nullptr;
 }
 
 void handleSleep() {
@@ -2314,18 +2451,20 @@ void handleSleep() {
   // Skärmen väcks av all aktivitet efter att den släcktes.
   if (screenOff && (long)(lastActivityMs - screenOffSince) > 0) screenWake();
 
-  if (!readyForSleep(now)) return;
+  const char* blocker = sleepBlocker(now);
+  if (blocker) { sleepWhyNot = blocker; return; }
 
   if (lidClosed) {
-    if (idleFor < SLEEP_LID_CLOSED_MS) return;
+    if (idleFor < SLEEP_LID_CLOSED_MS) { sleepWhyNot = "väntar 30 s efter senaste händelsen"; return; }
     // Pauser som väntar på uppladdning: ge nätet en stund först. De ligger
     // kvar i minnet och skickas efter nästa uppvaknande annars.
-    if (wifiQueueCount > 0 && idleFor < SLEEP_UPLOAD_GRACE_MS) return;
+    if (wifiQueueCount > 0 && idleFor < SLEEP_UPLOAD_GRACE_MS) { sleepWhyNot = "försöker skicka pauser"; return; }
     // Locket stängdes medan servern inte hunnit svara om taggen: vänta.
-    if (startWhenKnown && idleFor < SLEEP_OFFLINE_START_MS) return;
+    if (startWhenKnown && idleFor < SLEEP_OFFLINE_START_MS) { sleepWhyNot = "väntar på servern"; return; }
     goToDeepSleep();
-  } else if (!screenOff && !tagPresent && !pairHold && idleFor > SCREEN_IDLE_MS) {
-    screenSleep();
+  } else {
+    sleepWhyNot = "locket öppet";
+    if (!screenOff && !tagPresent && !pairHold && idleFor > SCREEN_IDLE_MS) screenSleep();
   }
 }
 
@@ -2372,6 +2511,17 @@ void setup() {
   Serial.printf("Heap efter sprite: %u byte fri\n", ESP.getFreeHeap());
 
   loadPersisted();
+  diagLoad();
+  bootNo++;
+  prefs.putUInt("dg_boot", bootNo);
+  {
+    uint8_t rr = (uint8_t)esp_reset_reason();
+    uint8_t wc = (uint8_t)esp_sleep_get_wakeup_cause();
+    Serial.printf("Start #%lu: %s, %s, batteri %.2f V\n", (unsigned long)bootNo,
+                  resetReasonName(rr), wakeName(wc), batteryMv() / 1000.0);
+    diagAdd(0, rr, wc);
+  }
+  diagPrint();
   // Vaknade lådan ur pausdvalan fortsätter pausen, och checkpointen är
   // bara en reserv (endSession tar bort den). Annars: vanlig återställning.
   bool resumePause = false;
@@ -2419,6 +2569,7 @@ void setup() {
 }
 
 void loop() {
+  handleSerialCommand();
   handlePortal();
   pollTag();
   handleLid();
@@ -2534,10 +2685,10 @@ void loop() {
 
   static unsigned long lastHeapLog = 0;
   if (now - lastHeapLog > HEAP_LOG_MS) {
-    Serial.printf("batteri=%d%% (%.2f V) heap=%u största block=%u fas=%s wifi=%s wifi-kö=%d\n",
-                  batteryPercent(), analogReadMilliVolts(BATTERY_ADC_PIN) * 2.0 / 1000.0,
+    Serial.printf("batteri=%d%% (%.2f V) heap=%u största block=%u fas=%s wifi=%s wifi-kö=%d sover inte: %s\n",
+                  batteryPercent(), batteryMv() / 1000.0,
                   ESP.getFreeHeap(), ESP.getMaxAllocHeap(), phaseName(phase),
-                  wifiUp ? "uppe" : "nere", wifiQueueCount);
+                  wifiUp ? "uppe" : "nere", wifiQueueCount, sleepWhyNot);
     lastHeapLog = now;
   }
 
