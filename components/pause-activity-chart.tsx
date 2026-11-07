@@ -21,6 +21,12 @@ import { usePalette } from '../contexts/ThemeContext';
  * en färdig delmängd: att byta månad ska vara ren datummatematik, inte ett nytt
  * nätverksanrop.
  *
+ * **Intentionerna står under diagrammet, inte i det.** Upp till fem rader —
+ * emoji, namn, ett tunt streck i diagrammets blå och talet — för perioden,
+ * eller för den valda stapeln. Staplarna färgade efter intention prövades och
+ * föll: för stökigt. Etiketten och emojin räknas ut av den som anropar
+ * (`tag`) — diagrammet vet inget om kategorier.
+ *
  * Veckan börjar på MÅNDAG i LOKAL tid här. Det är inte samma gräns som
  * circle_week_start() i supabase/circles.sql, som ligger på måndag 00:00 UTC —
  * och det är med flit: kretsens vecka måste vara delad för att potten ska
@@ -28,12 +34,23 @@ import { usePalette } from '../contexts/ThemeContext';
  * betyda den tisdag du faktiskt levde.
  */
 
-export type ChartSession = { startedAt: string; durationSecs: number };
+export type ChartTag = { key: string; label: string; emoji: string };
+export type ChartSession = {
+  startedAt: string; durationSecs: number;
+  /** Pausens intention, upplöst. `null` = otaggad. */
+  tag?: ChartTag | null;
+};
 
 type Range = 'day' | 'week' | 'month' | 'year';
 type Metric = 'count' | 'total' | 'avg';
 
-type Bucket = { count: number; secs: number };
+type Tally = { count: number; secs: number };
+type Bucket = Tally & { parts: Record<string, Tally> };
+
+/** Otaggade pauser räknas i staplarna men står inte bland intentionerna. */
+const UNTAGGED = '__untagged';
+/** Så många intentioner som visas under diagrammet. */
+const TAG_ROWS_MAX = 5;
 
 /** En etikett på skalan och hur många fack den spänner över. */
 type AxisSpan = { label: string; span: number };
@@ -129,7 +146,7 @@ function bucketIndex(range: Range, d: Date) {
   return d.getMonth();
 }
 
-function metricValue(b: Bucket, metric: Metric) {
+function metricValue(b: Tally, metric: Metric) {
   if (metric === 'count') return b.count;
   if (metric === 'total') return b.secs;
   return b.count > 0 ? b.secs / b.count : 0;
@@ -145,11 +162,19 @@ export function PauseActivityChart({ sessions }: { sessions: ChartSession[] }) {
   // Stapelhöjderna behöver ett tal, men ytan får sin höjd av flex — mät den.
   const [plotH, setPlotH] = useState(180);
 
-  const { buckets, total } = useMemo(() => {
+  const { buckets, total, tags } = useMemo(() => {
     const { from, to } = periodBounds(range, anchor);
     const n = bucketCount(range, anchor);
-    const out: Bucket[] = Array.from({ length: n }, () => ({ count: 0, secs: 0 }));
-    const sum: Bucket = { count: 0, secs: 0 };
+    const out: Bucket[] = Array.from({ length: n }, () => ({ count: 0, secs: 0, parts: {} }));
+    const sum: Bucket = { count: 0, secs: 0, parts: {} };
+    const seen: Record<string, ChartTag> = {};
+    const add = (b: Bucket, key: string, secs: number) => {
+      b.count += 1;
+      b.secs += secs;
+      const t = (b.parts[key] ??= { count: 0, secs: 0 });
+      t.count += 1;
+      t.secs += secs;
+    };
 
     for (const s of sessions) {
       if (!s.startedAt) continue;
@@ -157,12 +182,14 @@ export function PauseActivityChart({ sessions }: { sessions: ChartSession[] }) {
       if (isNaN(d.getTime()) || d < from || d >= to) continue;
       const i = bucketIndex(range, d);
       if (i < 0 || i >= n) continue;
-      out[i].count += 1;
-      out[i].secs += s.durationSecs;
-      sum.count += 1;
-      sum.secs += s.durationSecs;
+      const key = s.tag?.key ?? UNTAGGED;
+      if (s.tag) seen[key] = s.tag;
+      add(out[i], key, s.durationSecs);
+      add(sum, key, s.durationSecs);
     }
-    return { buckets: out, total: sum };
+    // Bara de taggade; otaggat säger inget om vad tiden blev.
+    const tagged = Object.keys(sum.parts).filter(k => k !== UNTAGGED).map(k => seen[k]);
+    return { buckets: out, total: sum, tags: tagged };
   }, [sessions, range, anchor]);
 
   const max = useMemo(
@@ -224,6 +251,20 @@ export function PauseActivityChart({ sessions }: { sessions: ChartSession[] }) {
     const noun = b.count === 1 ? 'pause' : 'pauses';
     return `${label} · ${b.count} ${noun} · ${fmtSecs(b.secs)}`;
   }, [selected, buckets, range, anchor]);
+
+  // Intentionerna: den valda stapelns, annars periodens, största först efter
+  // måttet. Strecken mäts mot den största raden.
+  const tagSource = (selected !== null ? buckets[selected] : null) ?? total;
+  const tagRows = tags
+    .filter(t => tagSource.parts[t.key])
+    .map(t => {
+      const p = tagSource.parts[t.key];
+      const v = metricValue(p, metric);
+      return { ...t, v, value: metric === 'count' ? String(p.count) : fmtSecs(v) };
+    })
+    .sort((a, b) => b.v - a.v)
+    .slice(0, TAG_ROWS_MAX);
+  const tagMax = tagRows[0]?.v ?? 0;
 
   const tap = (i: number) => setSelected(prev => (prev === i ? null : i));
 
@@ -340,6 +381,21 @@ export function PauseActivityChart({ sessions }: { sessions: ChartSession[] }) {
       <Text style={[styles.readout, !readout && styles.readoutHidden]} numberOfLines={1}>
         {readout ?? 'placeholder'}
       </Text>
+
+      {tagRows.length > 0 && (
+        <View style={styles.tags}>
+          {tagRows.map(t => (
+            <View key={t.key} style={styles.tagRow}>
+              <Text style={styles.tagEmoji}>{t.emoji}</Text>
+              <Text style={styles.tagLabel} numberOfLines={1}>{t.label}</Text>
+              <View style={styles.tagTrack}>
+                <View style={[styles.tagFill, { width: `${Math.max(4, (t.v / tagMax) * 100)}%` }]} />
+              </View>
+              <Text style={styles.tagValue}>{t.value}</Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -513,4 +569,13 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     fontSize: 13, letterSpacing: 0.6, color: Palette.accentSoft, fontWeight: '600',
   },
   readoutHidden: { opacity: 0 },
+
+  // Intentionerna: en rad var, i diagrammets blå och utan egna kulörer.
+  tags: { marginTop: 18, gap: 10 },
+  tagRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  tagEmoji: { fontSize: 16, width: 22, textAlign: 'center' },
+  tagLabel: { width: 88, fontSize: 13, color: Palette.textSecondary },
+  tagTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: Palette.ink07, overflow: 'hidden' },
+  tagFill: { height: '100%', borderRadius: 3, backgroundColor: Palette.accent },
+  tagValue: { minWidth: 52, textAlign: 'right', fontSize: 13, fontWeight: '800', color: Palette.textPrimary },
 });

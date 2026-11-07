@@ -350,8 +350,7 @@ async function ensureAndroidChannel(): Promise<void> {
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: 'Daily pause reminder',
     importance: Notifications.AndroidImportance.DEFAULT,
-    // Ingen vibration. VIBRATE-behörigheten finns för ringsignalen i
-    // app/call.tsx, och en påminnelse som skakar telefonen motsäger det den
+    // Ingen vibration: en påminnelse som skakar telefonen motsäger det den
     // ber om.
     vibrationPattern: null,
   });

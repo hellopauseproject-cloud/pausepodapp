@@ -24,7 +24,7 @@ import { safeBottom } from '../lib/bottomInset';
 import { formatDuration } from '../lib/circles';
 import {
   DemoPhase, fetchGlobalPause, formatCountdown, formatGlobalPauseWhen, GLOBAL_PAUSE_DEMO, GlobalPause,
-  GlobalPausePerson, joinGlobalPause, setDemoPhase, wasSummarized,
+  GlobalPausePerson, joinGlobalPause, rejoinGlobalPause, setDemoPhase, wasSummarized,
 } from '../lib/globalPause';
 import { GLOBAL_PAUSE_NAME, notificationsBlocked, scheduleGlobalPauseReminder } from '../lib/notifications';
 import { HOLD_TO_START_MS, startPhonePause } from '../lib/pauseFlow';
@@ -245,6 +245,7 @@ function GlobalPauseScreen() {
     await joinGlobalPause(intention).catch(() => {});
     setPicking(false);
     setBusy(false);
+    if (pause?.me?.finished) rejoinGlobalPause(pause.starts_at);
     startPhonePause('replace', intention ?? '');
   };
 
@@ -303,6 +304,8 @@ function GlobalPauseScreen() {
   // DONE (lib/globalPause.ts `wasSummarized`).
   const done = !!pause.last && !wasSummarized(pause.last.starts_at);
   const mine = pause.me;
+  // Ute ur pausen men dörren står öppen: PAUSE står där igen.
+  const canStart = !!mine && (!mine.started || (!!mine.finished && doorOpen));
 
   const others = pause.people.filter(p => p.relation !== 'me' && p.state !== 'done');
   const featured = others.length > 0 ? others[Math.floor(now / LINE_MS) % others.length] : null;
@@ -385,7 +388,7 @@ function GlobalPauseScreen() {
 
         {done && pause.last?.was_there && <Text style={s.inLine}>You were there.</Text>}
 
-        {mine && !mine.started && !done && (
+        {canStart && !done && (
           <>
             {doorOpen ? (
               <View style={s.pauseWrap}>

@@ -55,7 +55,7 @@ export function GlobalPauseWeekCard({ count }: { count: number }) {
         <Text style={styles.line}>{line}</Text>
       </View>
       <View style={styles.globe}>
-        <GlobeGrid size={64} active={false} tint={ICON} />
+        <GlobeGrid size={64} active={false} tint={ICON} mark pulse />
       </View>
     </View>
   );

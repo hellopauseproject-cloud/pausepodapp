@@ -17,6 +17,8 @@
 -- * **Alla i rummet syns med användarnamn**, på begäran: att anmäla sig är att
 --   kliva in i rummet. Tabellen har inga grants, och `get_global_pause` lämnar
 --   aldrig ut ett user_id. Egna intentioner visas inte för någon annan.
+-- * **Den som gått ut får gå in igen** så länge dörren står öppen. Raden
+--   öppnas igen och tiden läggs till; efter dörren är en ny paus en vanlig paus.
 -- * **Bara den som anmält sig räknas.** En vanlig paus rapporterar också, men
 --   utan rad händer ingenting.
 
@@ -178,10 +180,13 @@ begin
     return;
   end if;
 
+  -- En avslutad rad öppnas igen av en ny start så länge dörren står öppen:
+  -- den som gått ut får gå in igen, och tiden läggs till den som redan räknats.
   select * into j
     from global_pause_joins g
    where g.user_id = auth.uid()
-     and g.finished_at is null
+     and (g.finished_at is null
+          or (p_event = 'running' and v_now <= g.starts_at + global_pause_open_after()))
      and g.starts_at - global_pause_open_before() <= v_now
      and g.starts_at > v_now - interval '1 day'
    order by g.starts_at desc
@@ -198,7 +203,8 @@ begin
     end if;
     update global_pause_joins g
        set started_at = coalesce(g.started_at, v_now),
-           running_since = coalesce(g.running_since, v_now)
+           running_since = coalesce(g.running_since, v_now),
+           finished_at = null
      where g.starts_at = j.starts_at and g.user_id = j.user_id;
     return;
   end if;
@@ -365,7 +371,8 @@ begin
     'server_now', v_now,
     'me', case when v_me_row.user_id is null then null else jsonb_build_object(
       'intention_id', v_me_row.intention_id,
-      'started', v_me_row.started_at is not null
+      'started', v_me_row.started_at is not null,
+      'finished', v_me_row.finished_at is not null
     ) end,
     'counts', v_counts,
     'people', v_people,

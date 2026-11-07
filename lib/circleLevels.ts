@@ -21,11 +21,9 @@ export type CircleLevel = {
  * Ordnad från nivå 1 och uppåt: index 0 är nivå 1. Nivå 1 ligger på 0 timmar
  * — man är med i stegen från första stunden, inte först när man förtjänat det.
  *
- * De två sista bryter mönstret med flit: *Legendary* och *MYTHICAL* saknar
- * `Pausers`-suffixet. Det är inte en miss som ska städas bort — de ska sticka
- * ut mot de åtta stegen under. Versalerna på `MYTHICAL` är däremot bara
- * versaler: `Legendary` skrevs om till normal skrivning, och `MYTHICAL` står
- * kvar tills någon säger till.
+ * Det sista steget bryter mönstret med flit: *Masters of PausePod* saknar
+ * `Pausers`-suffixet så att toppen sticker ut mot stegen under. Det hette
+ * `MYTHICAL PAUSERS` och byttes på begäran — det lät som en spelrang.
  */
 export const CIRCLE_LEVELS: readonly CircleLevel[] = [
   { name: 'New Pausers', hoursRequired: 0 },
@@ -37,7 +35,7 @@ export const CIRCLE_LEVELS: readonly CircleLevel[] = [
   { name: 'Veteran Pausers', hoursRequired: 200 },
   { name: 'Elite Pausers', hoursRequired: 400 },
   { name: 'Legendary Pausers', hoursRequired: 800 },
-  { name: 'MYTHICAL PAUSERS', hoursRequired: 1500 },
+  { name: 'Masters of PausePod', hoursRequired: 1500 },
 ];
 
 /** Högsta nivån. Stegen tar slut här — det finns inget elfte steg. */

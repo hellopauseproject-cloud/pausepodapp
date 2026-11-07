@@ -7,6 +7,7 @@ import {
   Text, TouchableOpacity, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { OpensPicker, SealedSendOverlay, SEALED_SEND_MS } from '../components/opens-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { track } from '../lib/analytics';
 import { supabase } from '../lib/supabase';
@@ -48,6 +49,7 @@ function SupportRespondVoiceScreen() {
   const st = useMemo(() => makeSt(Palette), [Palette]);
   const { user } = useAuth();
   const { storyId, ownerName } = useLocalSearchParams<{ storyId: string; ownerName: string }>();
+  const [sealed, setSealed] = useState(false);
   const insets = useSafeAreaInsets();
 
   const [permDeniedPerm, setPermDeniedPerm] = useState(false);
@@ -155,12 +157,15 @@ function SupportRespondVoiceScreen() {
         sender_id: user.id,
         response_type: 'voice',
         content_url: contentUrl,
+        // Försluten tills mottagaren gjort en paus (supabase/support_sealed.sql).
+        // Bara när den är vald, så att *Now* fungerar mot en databas utan kolumnen.
+        ...(sealed ? { opens_after_pause: true } : {}),
       });
       if (dbError) throw dbError;
 
-      track('support_response_sent', { response_type: 'voice' });
+      track('support_response_sent', { response_type: 'voice', sealed });
       setPhase('sent');
-      setTimeout(() => router.back(), 900);
+      setTimeout(() => router.back(), sealed ? SEALED_SEND_MS : 900);
     } catch (e: any) {
       setErrorMsg('Upload error: ' + (e?.message ?? JSON.stringify(e)));
       setPhase('reviewing');
@@ -247,6 +252,7 @@ function SupportRespondVoiceScreen() {
                 <FontAwesome5 name={playerStatus.playing ? 'pause' : 'play'} size={22} color={Palette.onAccent} />
               </TouchableOpacity>
             </View>
+            <OpensPicker sealed={sealed} onChange={setSealed} ownerName={ownerName ?? ''} />
             <View style={st.reviewActions}>
               <TouchableOpacity style={st.reRecordBtn} onPress={handleReRecord} activeOpacity={0.75}>
                 <FontAwesome5 name="redo" size={13} color={Palette.ink50} />
@@ -282,6 +288,7 @@ function SupportRespondVoiceScreen() {
           <Text style={st.errorText}>{errorMsg}</Text>
         </View>
       )}
+      {phase === 'sent' && sealed && <SealedSendOverlay />}
     </View>
   );
 }

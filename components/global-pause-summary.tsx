@@ -74,9 +74,10 @@ export function GlobalPauseSummary({ result, seconds, hasIntention, bell }: {
     }
   };
 
+  // Ensam står ingenting om de andra: raden hade bara sagt att ingen kom, och
+  // tiden tillsammans är då samma tal som den stora siffran.
   const others = Math.max(0, result.people - 1);
-  const withLine = others === 0
-    ? 'You held the room.'
+  const withLine = others === 0 ? null
     : others === 1 ? 'You paused with 1 other.' : `You paused with ${others} others.`;
 
   const home = () => {
@@ -92,8 +93,8 @@ export function GlobalPauseSummary({ result, seconds, hasIntention, bell }: {
         <GlobeGrid size={260} active fade={Palette.bg} />
         <Animated.Text entering={reveal(0)} style={s.kicker}>GLOBAL PAUSE</Animated.Text>
         <Animated.Text entering={reveal(1)} style={s.big}>{formatDuration(seconds)}</Animated.Text>
-        <Animated.Text entering={reveal(2)} style={s.sub}>{withLine}</Animated.Text>
-        {result.total_seconds > 0 && (
+        {withLine && <Animated.Text entering={reveal(2)} style={s.sub}>{withLine}</Animated.Text>}
+        {withLine && result.total_seconds > 0 && (
           <Animated.View entering={reveal(3)} style={s.togetherPill}>
             <Text style={s.togetherText}>{formatDuration(result.total_seconds)} together</Text>
           </Animated.View>

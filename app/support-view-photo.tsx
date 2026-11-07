@@ -10,6 +10,7 @@ import {
 } from '../lib/photoCaption';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
+import { SupportHeartButton } from '../components/support-heart-button';
 
 /**
  * Mottagarsidan av ett fotosvar. Bilden och bildtexten kommer var för sig ur
@@ -108,6 +109,9 @@ export default function SupportViewPhotoScreen() {
       </View>
 
       <View style={[styles.actions, { paddingBottom: insets.bottom + 32 }]}>
+        <View style={styles.heartWrap}>
+          <SupportHeartButton responseId={messageId} senderName={senderName ?? 'A friend'} />
+        </View>
         <TouchableOpacity style={styles.acceptBtn} onPress={handleAccept} activeOpacity={0.85}>
           <FontAwesome5 name="pause" size={13} color={Palette.onAccent} />
           <Text style={styles.acceptText}>I&apos;ll take a pause</Text>
@@ -151,6 +155,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   },
 
   actions: { paddingHorizontal: 24, paddingTop: 16, gap: 4, backgroundColor: Palette.bg },
+  heartWrap: { marginBottom: 14 },
   acceptBtn: {
     backgroundColor: Palette.accent,
     paddingVertical: 16, borderRadius: Radius.pill,

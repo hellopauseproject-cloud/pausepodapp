@@ -7,7 +7,8 @@ import {
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useAuth } from '../contexts/AuthContext';
-import { PauseActivityChart } from '../components/pause-activity-chart';
+import { ChartSession, PauseActivityChart } from '../components/pause-activity-chart';
+import { PauseTotalHeart } from '../components/pause-total-heart';
 import { AppPalette, Radius, Spacing, alpha, roomPalette } from '../constants/appTheme';
 import { RoomProvider, usePalette, useTheme } from '../contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -228,6 +229,8 @@ function StatsScreen() {
   const { user } = useAuth();
   const { height } = useWindowDimensions();
   const [sessions, setSessions]       = useState<SessionItem[]>([]);
+  // Hjärtat fylls först när raderna landat, inte medan de hämtas.
+  const [loaded, setLoaded]           = useState(false);
   const [visibleCount, setVisibleCount] = useState(10);
   const [selectedMsg, setSelectedMsg] = useState<MsgData | null>(null);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
@@ -345,6 +348,7 @@ function StatsScreen() {
         wakeCount: r.wake_count ?? 0,
         awakeSecs: r.awake_seconds ?? 0,
       })));
+      setLoaded(true);
 
       Animated.timing(dataFadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
     })();
@@ -437,6 +441,27 @@ function StatsScreen() {
   // sömndiagram.
   const pauseSessions = useMemo(() => sessions.filter(s => s.kind === 'pause'), [sessions]);
 
+  // Intentionerna under diagrammet: varje paus intention upplöst till samma
+  // nyckel och emoji som pausens kort (`findCat`), så att `FOCUS` och
+  // `focus` blir en rad.
+  const chartSessions = useMemo<ChartSession[]>(() => pauseSessions.map(s => {
+    if (!s.intention) return { startedAt: s.startedAt, durationSecs: s.durationSecs, tag: null };
+    const cat = findCat(s.intention);
+    const key = cat?.id ?? s.intention.toLowerCase();
+    const raw = cat?.label ?? fmtIntention(s.intention, categoryMap);
+    const label = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    return {
+      startedAt: s.startedAt,
+      durationSecs: s.durationSecs,
+      tag: { key, label, emoji: cat?.emoji ?? '⏸' },
+    };
+  // findCat läser tagCats.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [pauseSessions, tagCats, categoryMap]);
+
+  // Hjärtat: all tid, bara pauser. Listan kommer nyast först.
+  const totalSecs = useMemo(() => pauseSessions.reduce((a, s) => a + s.durationSecs, 0), [pauseSessions]);
+
   // Sömnens tre tal. Snitten gäller nätterna som hämtats (högst 30).
   const streak = currentNight ? nightStreak(nights, currentNight) : 0;
   const avgSleep = nights.length
@@ -475,14 +500,18 @@ function StatsScreen() {
           <FontAwesome name="chevron-left" size={14} color={Palette.accent} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.pageTitle}>YOUR PAUSES</Text>
       </Animated.View>
 
-      {/* Diagrammet får ta hela första skärmen — listan under nås genom att
-          skrolla, inte genom att trängas. Höjden mäts ur fönstret i stället för
-          att hårdkodas: en liten telefon ska inte få ett avklippt diagram. */}
-      <Animated.View style={[styles.chartSection, { minHeight: Math.max(400, height - 250) }, { opacity: dataFadeAnim }]}>
-        <PauseActivityChart sessions={pauseSessions} />
+      {/* Hjärtat: all tid man pausat. Står överst och rörs inte av
+          diagrammets bläddring (components/pause-total-heart.tsx). */}
+      <PauseTotalHeart totalSecs={totalSecs} loaded={loaded} />
+
+      {/* Diagrammet följer hjärtat och får nästan en skärm — listan under nås
+          genom att skrolla, inte genom att trängas. Höjden mäts ur fönstret i
+          stället för att hårdkodas: en liten telefon ska inte få ett avklippt
+          diagram. */}
+      <Animated.View style={[styles.chartSection, { minHeight: Math.max(440, height - 220) }, { opacity: dataFadeAnim }]}>
+        <PauseActivityChart sessions={chartSessions} />
       </Animated.View>
 
       {/* Sömnen i tre tal — sviten, läggdagen och nattens längd. Över
@@ -593,7 +622,7 @@ function StatsScreen() {
                     bred som den), så att de står centrerade under varandra. */}
                 {s.globalPause && (
                   <View style={styles.globeCorner} pointerEvents="none" accessibilityLabel="Global Pause">
-                    <GlobeGrid size={30} active={false} />
+                    <GlobeGrid size={30} active={false} mark markSize={0.36} />
                   </View>
                 )}
                 <View style={styles.sessionCardTop}>
@@ -740,11 +769,6 @@ const makeStyles = (Palette: AppPalette, Night: AppPalette) => StyleSheet.create
   sectionHeadRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginBottom: 12, marginTop: 4,
-  },
-  // Sidans rubrik, designsystemets display: Arial Black 900, versaler, tätt.
-  pageTitle: {
-    fontSize: 26, lineHeight: 30, fontWeight: '900', letterSpacing: -0.6,
-    color: Palette.textPrimary, marginTop: 14, marginBottom: 18,
   },
   sectionLabel: {
     fontSize: 12, fontWeight: '700', color: Palette.ink30,

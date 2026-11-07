@@ -70,7 +70,7 @@ const STEP_NAMES = ['welcome', 'profile', 'social'] as const;
  *
  * Lådsteget (step-box.tsx) ligger kvar som fil men används inte. När lådan
  * går att välja (`POD_COMING_SOON` = false) bör det tillbaka: den som inte
- * vet att lådan finns hittar aldrig dit, och tummarnas grind står ingen
+ * vet att lådan finns hittar aldrig dit, och (i v7) tummarnas grind står ingen
  * annanstans innan telefonen ligger i en stängd låda.
  */
 export default function IntroScreen() {

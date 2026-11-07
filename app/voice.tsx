@@ -10,6 +10,7 @@ import { clearPending, getPending } from '../lib/supportQueue';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
+import { SupportHeartButton } from '../components/support-heart-button';
 
 /**
  * Hör till **friends-rummet**. Rummet följer ärendet och inte filträdet — se
@@ -31,12 +32,12 @@ export default function VoiceRoom() {
 function VoiceScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
-  const pickupPlayer = useAudioPlayer(require('../assets/images/Pickupsound.mp3'));
+  // Ingen upplyftningston, ingen lur och ingen hörsnäcka: röstsvaret var ett
+  // samtal en gång (app/call.tsx, riven), och det kändes påträngande. Nu är
+  // det ett meddelande som spelas i högtalaren när kuvertet öppnats.
   const voicePlayer = useAudioPlayer(null);
-  const hangupPlayer = useAudioPlayer(require('../assets/images/HangUpSound.mp3'));
   const voiceStatus = useAudioPlayerStatus(voicePlayer);
 
-  const [speakerOn, setSpeakerOn] = useState(false);
   const [callerName, setCallerName] = useState('');
   const [callerPhoto, setCallerPhoto] = useState<string | null>(null);
   const [noFile, setNoFile] = useState(false);
@@ -45,6 +46,8 @@ function VoiceScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const markedRef = useRef(false);
   const supportResponseIdRef = useRef<string | null>(null);
+  // Hjärtat behöver id:t efter att ref:en nollats vid stängning.
+  const [responseId, setResponseId] = useState<string | null>(null);
 
   useEffect(() => {
     if (voiceStatus.didJustFinish) {
@@ -73,24 +76,22 @@ function VoiceScreen() {
 
       if (pending?.responseType === 'voice') {
         supportResponseIdRef.current = pending.id;
+        setResponseId(pending.id);
         setCallerName(pending.senderName);
         if (pending.senderAvatarUrl) setCallerPhoto(pending.senderAvatarUrl);
       }
 
       if (!mounted) return;
-      await new Promise(resolve => setTimeout(resolve, 600));
+      await new Promise(resolve => setTimeout(resolve, 400));
       if (!mounted) return;
 
       await setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
         interruptionMode: 'duckOthers',
-        shouldRouteThroughEarpiece: true,
+        shouldRouteThroughEarpiece: false,
       });
 
-      if (!mounted) return;
-      pickupPlayer.play();
-      await new Promise(resolve => setTimeout(resolve, 1000));
       if (!mounted) return;
 
       // Support response: play from URL
@@ -128,18 +129,7 @@ function VoiceScreen() {
     voicePlayer.play();
   };
 
-  const toggleSpeaker = async () => {
-    const newSpeakerOn = !speakerOn;
-    setSpeakerOn(newSpeakerOn);
-    await setAudioModeAsync({
-      allowsRecording: false,
-      playsInSilentMode: true,
-      interruptionMode: 'duckOthers',
-      shouldRouteThroughEarpiece: !newSpeakerOn,
-    });
-  };
-
-  const handleHangUp = async () => {
+  const handleClose = async () => {
     voicePlayer.pause();
     // Guarantee DB write is committed before navigating back (idempotent update)
     if (supportResponseIdRef.current) {
@@ -147,14 +137,7 @@ function VoiceScreen() {
       await supabase.from('support_responses').update({ delivered_at: ts, played_at: ts }).eq('id', supportResponseIdRef.current);
       supportResponseIdRef.current = null;
     }
-    try {
-      hangupPlayer.play();
-      setTimeout(() => {
-        router.replace('/(tabs)');
-      }, 400);
-    } catch (e) {
-      router.replace('/(tabs)');
-    }
+    router.replace('/(tabs)/friends' as never);
   };
 
   const handlePauseLink = async () => {
@@ -177,13 +160,14 @@ function VoiceScreen() {
             <FontAwesome5 name="user" size={48} color={Palette.accent} />
           </View>
         )}
-        <Text style={styles.callerName}>{callerName}</Text>
+        <Text style={styles.callerName}>Support from {callerName}</Text>
         <Text style={styles.callerSubtitle}>
-          {noFile ? 'No message to play' : showReplay ? 'Message finished' : 'Call in progress...'}
+          {noFile ? 'No message to play' : showReplay ? 'Message finished' : voiceStatus.playing ? 'Playing…' : 'Opening…'}
         </Text>
       </View>
 
       <View style={styles.buttons}>
+        <SupportHeartButton responseId={responseId} senderName={callerName || 'A friend'} />
         {showReplay && (
           <TouchableOpacity style={styles.replayButton} onPress={handleReplay}>
             <MaterialIcons name="replay" size={32} color={Palette.onAccent} />
@@ -199,15 +183,8 @@ function VoiceScreen() {
           </Animated.View>
         )}
 
-        <TouchableOpacity
-          style={[styles.speakerButton, speakerOn && styles.speakerButtonActive]}
-          onPress={toggleSpeaker}
-        >
-          <FontAwesome5 name="volume-up" size={24} color={Palette.onAccent} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.hangUpButton} onPress={handleHangUp}>
-          <FontAwesome name="phone" size={32} color={Palette.onAccent} style={{ transform: [{ rotate: '135deg' }] }} />
+        <TouchableOpacity style={styles.closeBtn} onPress={handleClose} activeOpacity={0.7}>
+          <Text style={styles.closeText}>Close</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -235,7 +212,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     borderColor: Palette.accent,
   },
   callerName: {
-    fontSize: 36,
+    fontSize: 26,
+    textAlign: 'center',
     color: Palette.textPrimary,
     fontWeight: 'bold',
     marginBottom: 8,
@@ -268,21 +246,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 3,
   },
-  speakerButton: {
-    alignItems: 'center',
-    backgroundColor: Palette.textFaint,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-  },
-  speakerButtonActive: { backgroundColor: Palette.accent },
-  hangUpButton: {
-    backgroundColor: Palette.danger,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  closeBtn: { paddingVertical: 10, paddingHorizontal: 20 },
+  closeText: { color: Palette.textSecondary, fontSize: 15, fontWeight: '600' },
 });

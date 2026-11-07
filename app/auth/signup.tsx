@@ -16,6 +16,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { usePalette } from '../../contexts/ThemeContext';
 import { signInWithGoogle } from '../../lib/googleAuth';
 import DismissKeyboardView from '../components/DismissKeyboardView';
+import { PausePodLogo } from '../../components/pause-pod-logo';
 
 export default function SignUpScreen() {
   const Palette = usePalette();
@@ -114,8 +115,7 @@ export default function SignUpScreen() {
       <DismissKeyboardView>
       <View style={styles.inner}>
         <View style={styles.logoRow}>
-          <FontAwesome name="pause" size={22} color={Palette.accent} />
-          <Text style={styles.logoText}>PAUSEPOD</Text>
+          <PausePodLogo color={Palette.accent} />
         </View>
 
         <View style={styles.header}>
@@ -230,12 +230,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     alignSelf: 'center',
-  },
-  logoText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: Palette.accent,
-    letterSpacing: 4,
   },
   header: {
     gap: 8,

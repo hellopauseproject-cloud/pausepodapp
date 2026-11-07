@@ -8,6 +8,7 @@ import {
   Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { OpensPicker, SealedSendOverlay, SEALED_SEND_MS } from '../components/opens-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { track } from '../lib/analytics';
 import { supabase } from '../lib/supabase';
@@ -28,6 +29,7 @@ export default function SupportRespondPhotoScreen() {
   const st = useMemo(() => makeSt(Palette), [Palette]);
   const { user } = useAuth();
   const { storyId, ownerName } = useLocalSearchParams<{ storyId: string; ownerName: string }>();
+  const [sealed, setSealed] = useState(false);
   const insets = useSafeAreaInsets();
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -161,15 +163,18 @@ export default function SupportRespondPhotoScreen() {
         // leta på.
         text_content: text || null,
         caption_y: text ? captionYRef.current : null,
+        // Försluten tills mottagaren gjort en paus (supabase/support_sealed.sql).
+        // Bara när den är vald, så att *Now* fungerar mot en databas utan kolumnen.
+        ...(sealed ? { opens_after_pause: true } : {}),
       });
       if (dbError) throw dbError;
 
       // Längden, inte texten — samma linje som textsvaret: orden bor i
       // support_responses, och en kopia i app_events hade gjort en raderad rad
       // till en rad som finns kvar någon annanstans.
-      track('support_response_sent', { response_type: 'photo', length: text.length });
+      track('support_response_sent', { response_type: 'photo', length: text.length, sealed });
       setPhase('sent');
-      setTimeout(() => router.back(), 900);
+      setTimeout(() => router.back(), sealed ? SEALED_SEND_MS : 900);
     } catch (e: any) {
       const what = step === 'upload' ? 'Could not upload the photo' : 'Could not send the photo';
       setErrorMsg(what + ': ' + (e?.message ?? JSON.stringify(e)));
@@ -333,6 +338,9 @@ export default function SupportRespondPhotoScreen() {
         )}
 
         {phase === 'editing' && !editingCaption && (
+          <OpensPicker sealed={sealed} onChange={setSealed} ownerName={ownerName ?? ''} onDark />
+        )}
+        {phase === 'editing' && !editingCaption && (
           <View style={st.reviewActions}>
             <TouchableOpacity style={st.retakeBtn} onPress={resetToCamera} activeOpacity={0.75}>
               <FontAwesome5 name="redo" size={13} color={Palette.ink70} />
@@ -367,6 +375,7 @@ export default function SupportRespondPhotoScreen() {
           </View>
         )}
       </View>
+      {phase === 'sent' && sealed && <SealedSendOverlay />}
     </View>
   );
 }

@@ -101,13 +101,20 @@ const ROOM_GLOW_2: Partial<Record<RoomKey, GlowSpec>> = {
 };
 
 // ── Topp och botten ──
-// En vågrät mörkning uppifrån och nedifrån, på begäran, för Pause-rummet.
-// Vinjetten nedan är en ellips och mörknar mest hörnen; den här ramar in
-// sidan ovanför och under, där topbaren och flikraden står.
+// En vågrät mörkning uppifrån och nedifrån, på begäran, för Pause-rummet och
+// sedan för Circle och Support (`friends`). Vinjetten nedan är en ellips och
+// mörknar mest hörnen; den här ramar in sidan ovanför och under, där topbaren
+// och flikraden står. Kulören är rummets egen i mörkt — mörkgrön respektive
+// mörk terrakotta — och inte svart, så att kanten fördjupar rummet i stället
+// för att gråna det.
 type EdgeSpec = { color: string; top: number; bottom: number };
 const ROOM_EDGES: Partial<Record<RoomKey, EdgeSpec>> = {
   'dark:pause': { color: 'rgb(2,5,14)', top: 0.55, bottom: 0.6 },
   'light:pause': { color: 'rgb(10,19,48)', top: 0.16, bottom: 0.2 },
+  'dark:circle': { color: 'rgb(4,30,18)', top: 0.55, bottom: 0.6 },
+  'light:circle': { color: 'rgb(12,66,40)', top: 0.18, bottom: 0.22 },
+  'dark:friends': { color: 'rgb(38,13,4)', top: 0.55, bottom: 0.6 },
+  'light:friends': { color: 'rgb(104,44,14)', top: 0.18, bottom: 0.22 },
 };
 
 // ── Vinjetten ──────────────────────────────────────────────────────────────

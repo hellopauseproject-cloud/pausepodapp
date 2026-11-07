@@ -138,6 +138,27 @@ export const getAllCategories = async (): Promise<Category[]> => {
   return [...DEFAULT_CATEGORIES, ...customCats];
 };
 
+/**
+ * En egen intention, skapad utanför profilen (vanornas väljare på Hem). Samma
+ * form som `addCustom` i components/intention-settings.tsx: den sparas bland
+ * de egna och läggs till bland de valda, så att den också erbjuds före pausen
+ * — en vana man inte kan välja före pausen går bara att tagga efteråt.
+ *
+ * Har inget val sparats än börjar listan på alla standardintentioner, inte på
+ * tomt: utan det hade den nya blivit den enda pausskärmen erbjöd (samma
+ * skillnad som `getSelectedCategories` gör i sin catch).
+ */
+export const addCustomCategory = async (emoji: string, label: string): Promise<Category> => {
+  const cat: Category = { id: 'custom_' + Date.now(), label: label.trim().toUpperCase(), emoji: emoji.trim() };
+  let customCats: Category[] = [];
+  try { customCats = JSON.parse(await readDoc(CUSTOM_CATEGORIES_PATH)); } catch (e) {}
+  await writeDoc(CUSTOM_CATEGORIES_PATH, JSON.stringify([...customCats, cat]));
+  let ids: string[];
+  try { ids = JSON.parse(await readDoc(CATEGORIES_PATH)); } catch (e) { ids = DEFAULT_CATEGORIES.map(c => c.id); }
+  await saveSelectedCategories([...ids, cat.id]);
+  return cat;
+};
+
 export const findCategoryById = async (id: string): Promise<Category | null> => {
   let customCats: Category[] = [];
   try {

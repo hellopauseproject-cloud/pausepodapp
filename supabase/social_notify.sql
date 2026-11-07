@@ -262,6 +262,9 @@ begin
    where f.status = 'accepted'
      and (f.requester_id = new.user_id or f.receiver_id = new.user_id)
      and p.id <> new.user_id
+     -- En förfrågan till utvalda vänner knackar bara hos dem (se
+     -- `recipient_ids` i wishlist.sql); null är alla vänner.
+     and (new.recipient_ids is null or p.id = any(new.recipient_ids))
      and p.push_token is not null
      and push_is_daytime(p.tz_offset_minutes);
 
@@ -269,7 +272,7 @@ begin
     return new;
   end if;
 
-  v_day := ((now() at time zone 'utc') - make_interval(mins => coalesce(v_tz, 0)))::date;
+  v_day :=((now() at time zone 'utc') - make_interval(mins => coalesce(v_tz, 0)))::date;
 
   insert into support_request_pings (sender_id, day, story_id)
   values (new.user_id, v_day, new.id)
@@ -388,7 +391,12 @@ begin
   perform push_post(
     jsonb_build_array(v_token),
     v_name || ' sent you support',
-    'Open it now.',
+    -- Ett förseglat svar (supabase/support_sealed.sql) öppnas efter en paus.
+    -- Läst ur jsonb, så att funktionen fungerar också innan kolumnen finns.
+    case when coalesce((to_jsonb(new) ->> 'opens_after_pause')::boolean, false)
+      then 'Take a pause to open.'
+      else 'Open it now.'
+    end,
     jsonb_build_object('type', 'support_received'),
     'support-received'
   );

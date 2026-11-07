@@ -241,8 +241,13 @@ function InnerLayout() {
           } as never);
           return;
         case SUPPORT_REQUEST_TYPE:
+          router.navigate('/(tabs)/friends' as never);
+          return;
+        // Rakt till kuvertet: det är öppningen som är ritualen, och den
+        // sker där — inte på låsskärmen.
         case SUPPORT_RECEIVED_TYPE:
           router.navigate('/(tabs)/friends' as never);
+          router.push('/support-arrived' as never);
           return;
         case GLOBAL_PAUSE_TYPE:
           router.push('/global-pause' as never);
@@ -726,9 +731,11 @@ function InnerLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="auth" options={{ headerShown: false }} />
         <Stack.Screen name="intro" options={{ headerShown: false }} />
-        <Stack.Screen name="call" options={{ headerShown: false }} />
-        <Stack.Screen name="voice" options={{ headerShown: false }} />
-        <Stack.Screen name="video" options={{ headerShown: false }} />
+        {/* Stödsvaren öppnas ur ett kuvert (support-arrived) och brevet
+            tonar över i visningsskärmen — därför fade på alla fyra. */}
+        <Stack.Screen name="support-arrived" options={{ headerShown: false, animation: 'fade' }} />
+        <Stack.Screen name="voice" options={{ headerShown: false, animation: 'fade' }} />
+        <Stack.Screen name="video" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="pause" options={{ headerShown: false }} />
         <Stack.Screen name="pausesummary" options={{ headerShown: false }} />
@@ -757,8 +764,8 @@ function InnerLayout() {
         <Stack.Screen name="support-respond-video" options={{ headerShown: false }} />
         <Stack.Screen name="support-respond-photo" options={{ headerShown: false }} />
         <Stack.Screen name="support-view-text" options={{ headerShown: false }} />
-        <Stack.Screen name="support-view-photo" options={{ headerShown: false }} />
-        <Stack.Screen name="text-message" options={{ headerShown: false }} />
+        <Stack.Screen name="support-view-photo" options={{ headerShown: false, animation: 'fade' }} />
+        <Stack.Screen name="text-message" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       {showOverlay && (

@@ -6,7 +6,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Animated, Easing, Image, Modal, Pressable, StyleSheet, Text,
+  Alert, Animated, Easing, Image, Keyboard, Modal, Platform, Pressable, StyleSheet, Text,
   TouchableOpacity, useWindowDimensions, View,
 } from 'react-native';
 import Reanimated, {
@@ -14,11 +14,13 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { CelebrationBurst } from '../../components/celebration-burst';
 import { DurationWheel } from '../../components/duration-wheel';
+import { HabitGoalsEditor, HabitPicker } from '../../components/habit-goals-editor';
 import { HoldToStartButton } from '../../components/hold-to-start-button';
 import { LiquidBars } from '../../components/liquid-bars';
 import { ProgressArc } from '../../components/progress-arc';
 import { GLOBAL_PAUSE_LINE_H, GlobalPauseLine } from '../../components/global-pause-line';
 import { PauseAmbience } from '../../components/pause-ambience';
+import { PausePodLogo } from '../../components/pause-pod-logo';
 import { PauseButtonFace } from '../../components/pause-button-face';
 import { PauseInviteRow } from '../../components/pause-invite-row';
 import { PauseTagSheet } from '../../components/pause-tag-sheet';
@@ -41,6 +43,9 @@ import { NightMoon } from '../../components/night-moon';
 import { SegmentedPill } from '../../components/segmented-pill';
 import { supabase } from '../../lib/supabase';
 import { getTodos, Todo } from '../../lib/todos';
+import { getHabitProgress, HabitGoal, habitsChanged, setHabitGoals } from '../../lib/habits';
+import { Category, getAllCategories, getSelectedCategories } from '../pauseLogger';
+import { countReadyEnvelopes } from '../../lib/supportSealed';
 import type { DailyGoalProgress } from '../../types/database';
 
 // Att göra-listan är tillbaka, men som en lapp som sticker upp i nedre
@@ -268,6 +273,32 @@ function HomeScreen() {
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [goalIndex, setGoalIndex] = useState(() => nearestGoalIndex(3600));
   const [savingGoal, setSavingGoal] = useState(false);
+  // Vanorna i samma ruta (lib/habits.ts). `savedHabits` är det som låg i
+  // basen när rutan öppnades, så att knappen bara skriver dem när något
+  // ändrats; `habitDays` är veckans räkning för de sparade.
+  const [habitDraft, setHabitDraft] = useState<HabitGoal[]>([]);
+  const [savedHabits, setSavedHabits] = useState<HabitGoal[]>([]);
+  const [habitDays, setHabitDays] = useState<Record<string, number>>({});
+  const [habitCats, setHabitCats] = useState<Category[]>([]);
+  // Väljaren byter rutans innehåll, se `HabitPicker`.
+  const [habitPicking, setHabitPicking] = useState(false);
+  // *Your own* har textfält, och rutan står mitt på skärmen där tangentbordet
+  // annars lägger sig över den. Höjden ur `Keyboard`-händelserna, som
+  // att göra-arket: med `edgeToEdgeEnabled` gör KeyboardAvoidingView
+  // ingenting på Android.
+  const [goalKeyboardH, setGoalKeyboardH] = useState(0);
+  useEffect(() => {
+    if (!showGoalModal) return;
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      e => setGoalKeyboardH(e.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setGoalKeyboardH(0),
+    );
+    return () => { show.remove(); hide.remove(); setGoalKeyboardH(0); };
+  }, [showGoalModal]);
 
   const { height: windowH, width: windowW } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -370,6 +401,22 @@ function HomeScreen() {
   useFocusEffect(useCallback(() => {
     isIntroDeferred().then(setIntroDeferred);
   }, []));
+
+  /**
+   * *Your envelope is ready*: förseglat stöd som en paus just låst upp
+   * (supabase/support_sealed.sql). Läses vid fokus och en gång till efter
+   * 2,5 s — Hem får fokus direkt efter pausen, innan pausens rad landat och
+   * triggern hunnit låsa upp kuvertet.
+   */
+  const [envelopesReady, setEnvelopesReady] = useState(0);
+  useFocusEffect(useCallback(() => {
+    if (!user?.id) return;
+    let alive = true;
+    const check = () => countReadyEnvelopes(user.id).then(n => { if (alive) setEnvelopesReady(n); });
+    check();
+    const t = setTimeout(check, 2500);
+    return () => { alive = false; clearTimeout(t); };
+  }, [user?.id]));
 
   // ── Efter en paus ────────────────────────────────────────────────────────
   // Lappen från sammanfattningen läses vid fokus, en gång. Klockan ringer
@@ -536,7 +583,8 @@ function HomeScreen() {
   const showInviteRow = !isNight && !!user?.id;
   const heroExtras = MODE_PILL_H
     + (isNight ? NIGHT_TITLE_H : goalMet ? GOAL_MET_H : 0)
-    + (introDeferred ? SET_GOAL_BTN_H : 0);
+    + (introDeferred ? SET_GOAL_BTN_H : 0)
+    + (envelopesReady > 0 && !isNight ? SET_GOAL_BTN_H : 0);
   // Ytan mäts från blockets egen överkant (`centerY`) ner till containerns
   // innerkant. Innan båda landat gäller en räkning ur fönstret.
   const [centerY, setCenterY] = useState(0);
@@ -611,7 +659,22 @@ function HomeScreen() {
   // siffran som ändrar det. Utan mål än öppnar ratten på en timme.
   const openGoalModal = () => {
     setGoalIndex(nearestGoalIndex(daily?.daily_target_seconds ?? 3600));
+    setHabitPicking(false);
     setShowGoalModal(true);
+    // Vanorna hämtas när rutan öppnas, inte vid fokus: de syns bara här.
+    // Valbara är de intentioner pausskärmen erbjuder, plus de som redan är
+    // en vana även om de valts bort i profilen sedan — annars saknade raden
+    // sin emoji.
+    Promise.all([getHabitProgress(), getSelectedCategories(), getAllCategories()])
+      .then(([progress, offered, all]) => {
+        const goals = progress.map(({ category_id, label, times_per_week }) => ({ category_id, label, times_per_week }));
+        setSavedHabits(goals);
+        setHabitDraft(goals);
+        setHabitDays(Object.fromEntries(progress.map(p => [p.category_id, p.done_this_week])));
+        const extra = all.filter(c => goals.some(g => g.category_id === c.id) && !offered.some(o => o.id === c.id));
+        setHabitCats([...offered, ...extra]);
+      })
+      .catch(() => {});
   };
 
   const handleSaveGoal = async () => {
@@ -621,6 +684,7 @@ function HomeScreen() {
       // Samma RPC som Kretsen sparar med. Den kräver ingen krets: talet bor på
       // profilen, och kretsloggen skrivs bara om det finns en krets att logga i.
       await setDailyGoal(GOAL_OPTIONS[goalIndex]);
+      if (habitsChanged(habitDraft, savedHabits)) await setHabitGoals(habitDraft);
       setShowGoalModal(false);
       loadDaily();
     } catch (e: any) {
@@ -671,10 +735,7 @@ function HomeScreen() {
       }}
     >
       <Animated.View style={[styles.topBar, { opacity: fadeAnim }]}>
-        <View style={styles.logoRow}>
-          <FontAwesome name="pause" size={16} color={Palette.hue} />
-          <Text style={styles.logoText}>PAUSEPOD</Text>
-        </View>
+        <PausePodLogo />
 
         <View style={styles.rightButtons}>
           <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/stats')}>
@@ -943,6 +1004,22 @@ function HomeScreen() {
 
           {/* Puffen ligger utanför de två grenarna med flit: den som sköt upp
               introduktionen kan ha satt ett mål här under tiden. */}
+          {/* Samma plats och form som puffarna ovan. Inte i nattläge: natten
+              är privat och har bara SLEEP. */}
+          {envelopesReady > 0 && !isNight && (
+            <TouchableOpacity
+              onPress={() => router.push('/support-arrived' as never)}
+              activeOpacity={0.6}
+              style={[styles.setGoalBtn, styles.envelopeBtn]}
+              accessibilityLabel="Your envelope is ready. Open it."
+            >
+              <FontAwesome5 name="envelope-open-text" size={13} color={Palette.accent} />
+              <Text style={styles.setGoalBtnText}>
+                {envelopesReady === 1 ? 'Your envelope is ready' : `${envelopesReady} envelopes are ready`}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {introDeferred && (
             <TouchableOpacity
               onPress={() => router.push('/intro' as never)}
@@ -1031,20 +1108,50 @@ function HomeScreen() {
 
       {/* Dagsmålet. Samma ratt och samma ord som i Kretsen — det är ett och
           samma tal. */}
-      <Modal visible={showGoalModal} transparent animationType="fade" onRequestClose={() => setShowGoalModal(false)}>
-        <View style={styles.backdrop}>
+      <Modal
+        visible={showGoalModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => (habitPicking ? setHabitPicking(false) : setShowGoalModal(false))}
+      >
+        <View style={[styles.backdrop, goalKeyboardH > 0 && { paddingBottom: goalKeyboardH + Spacing.lg }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowGoalModal(false)} />
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Your daily goal</Text>
+            {habitPicking ? (
+              <HabitPicker
+                categories={habitCats}
+                habits={habitDraft}
+                onPick={h => { setHabitDraft(d => [...d, h]); setHabitPicking(false); }}
+                onBack={() => setHabitPicking(false)}
+                onCreated={cat => setHabitCats(c => [...c, cat])}
+              />
+            ) : (<>
+            <Text style={styles.cardTitle}>Your goals</Text>
 
+            {/* Tid per dag, vanor per vecka — orden *a day* och *days a
+                week* bär skillnaden. Ratten är oförändrad. */}
+            <View style={styles.goalHead}>
+              <Text style={styles.goalEyebrow}>TIME</Text>
+              <Text style={styles.goalNote}>a day</Text>
+            </View>
             <DurationWheel index={goalIndex} onIndexChange={setGoalIndex} />
 
+            <View style={styles.goalDivider} />
+            <HabitGoalsEditor
+              habits={habitDraft}
+              onChange={setHabitDraft}
+              onAdd={() => setHabitPicking(true)}
+              categories={habitCats}
+              progress={habitDays}
+            />
+
             <TouchableOpacity style={styles.primaryBtn} onPress={handleSaveGoal} disabled={savingGoal}>
-              <Text style={styles.primaryBtnText}>{savingGoal ? 'Saving…' : 'Set goal'}</Text>
+              <Text style={styles.primaryBtnText}>{savingGoal ? 'Saving…' : 'Save goals'}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowGoalModal(false)} style={styles.cancelLink}>
               <Text style={styles.cancelLinkText}>Cancel</Text>
             </TouchableOpacity>
+            </>)}
           </View>
         </View>
       </Modal>
@@ -1128,18 +1235,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     borderRadius: 15,
     backgroundColor: Palette.surface,
   },
-  logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  // Märket i ett ord, som i designsystemet.
-  logoText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: Palette.hue,
-    letterSpacing: 4,
-  },
   center: {
     width: '100%',
     alignItems: 'center',
@@ -1190,6 +1285,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   ringSub: { fontSize: 14, lineHeight: 18, color: Palette.textSecondary, textAlign: 'center' },
   setGoalBtn: { marginTop: Spacing.lg, paddingVertical: 6, paddingHorizontal: 4 },
   setGoalBtnText: { fontSize: 14, fontWeight: '700', color: Palette.accent },
+  envelopeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
   backdrop: {
     flex: 1, backgroundColor: Palette.scrim,
@@ -1200,6 +1296,11 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     padding: Spacing.xl, gap: Spacing.md,
   },
   cardTitle: { fontSize: 18, fontWeight: '700', color: Palette.textPrimary, textAlign: 'center' },
+  // Samma rubrikrad som vanornas (components/habit-goals-editor.tsx).
+  goalHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: -Spacing.xs },
+  goalEyebrow: { ...Palette.eyebrow },
+  goalNote: { fontSize: 12, lineHeight: 16, color: Palette.textTertiary },
+  goalDivider: { height: StyleSheet.hairlineWidth, backgroundColor: Palette.ink10 },
   primaryBtn: { backgroundColor: Palette.accent, paddingVertical: 14, borderRadius: Radius.pill, alignItems: 'center' },
   primaryBtnText: { color: Palette.onAccent, fontSize: 15, fontWeight: '700' },
   cancelLink: { alignItems: 'center', paddingVertical: 6 },

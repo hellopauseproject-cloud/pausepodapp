@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Reanimated, {
   Easing, SharedValue, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming,
 } from 'react-native-reanimated';
@@ -124,7 +124,103 @@ export function CelebrationBurst({ burstKey, size, count = 22 }: {
   );
 }
 
+/**
+ * Ett lätt konfettiregn över hela skärmen — när man kommer in i kretsfliken
+ * och veckans mål är nått. Samma kulörer och samma regler som skuren (fasta
+ * tal, inget grönt, ingenting med reducerad rörelse, äter aldrig ett tryck),
+ * men bitarna faller uppifrån och vajar i stället för att spruta ur en punkt.
+ * Glest med flit: en hälsning när man kommer in, inte en fest varje gång.
+ *
+ * Regnet går när `rainKey` byter värde (0 = aldrig).
+ */
+const RAIN_MS = 2800;
+
+type Drop = { x: number; fall: number; sway: number; size: number; color: number; rect: boolean; spin: number; delay: number };
+
+function makeDrops(count: number): Drop[] {
+  return Array.from({ length: count }, (_, i) => {
+    const wobble = ((i * 37) % 23) / 23; // 0–1, fast per bit
+    return {
+      // Gyllene snittet över bredden: jämnt utan att stå i rader.
+      x: (i * 0.618034 + 0.05) % 1,
+      fall: 0.55 + wobble * 0.45,
+      sway: (i % 2 ? 1 : -1) * (8 + ((i * 11) % 14)),
+      size: 6 + ((i * 5) % 5),
+      color: i,
+      rect: i % 3 !== 0,
+      spin: (i % 2 ? 1 : -1) * (200 + ((i * 53) % 300)),
+      delay: ((i * 7) % 11) / 11 * 0.3,
+    };
+  });
+}
+
+function RainDrop({ drop, t, width, height, color }: {
+  drop: Drop; t: SharedValue<number>; width: number; height: number; color: string;
+}) {
+  const style = useAnimatedStyle(() => {
+    const local = Math.max(0, Math.min(1, (t.value - drop.delay) / (1 - drop.delay)));
+    if (local <= 0 || local >= 1) return { opacity: 0 };
+    return {
+      opacity: local < 0.75 ? 1 : 1 - (local - 0.75) / 0.25,
+      transform: [
+        { translateX: drop.x * width + Math.sin(local * Math.PI * 3 + drop.x * 6) * drop.sway },
+        // Lätt acceleration, som något som faller genom luft.
+        { translateY: -20 + (height * drop.fall + 20) * (0.35 * local + 0.65 * local * local) },
+        { rotate: `${drop.spin * local}deg` },
+      ],
+    };
+  });
+  return (
+    <Reanimated.View
+      style={[
+        styles.drop,
+        {
+          width: drop.rect ? drop.size * 0.6 : drop.size,
+          height: drop.rect ? drop.size * 1.4 : drop.size,
+          borderRadius: drop.rect ? 1.5 : drop.size / 2,
+          backgroundColor: color,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+export function ConfettiRain({ rainKey, count = 34 }: { rainKey: number; count?: number }) {
+  const Palette = usePalette();
+  const reduceMotion = useReducedMotion();
+  const { width, height } = useWindowDimensions();
+  const t = useSharedValue(0);
+  const drops = useMemo(() => makeDrops(count), [count]);
+  const colors = useMemo(() => [
+    Palette.highlight,
+    Palette.slideAccent.rose,
+    Palette.slideAccent.teal,
+    Palette.slideAccent.orchid,
+    Palette.accent,
+    Palette.slideAccent.violet,
+    Palette.dangerSoft,
+  ], [Palette]);
+
+  useEffect(() => {
+    if (!rainKey || reduceMotion) return;
+    t.value = 0;
+    t.value = withTiming(1, { duration: RAIN_MS, easing: Easing.linear });
+  }, [rainKey, reduceMotion, t]);
+
+  if (reduceMotion || !rainKey) return null;
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {drops.map((d, i) => (
+        <RainDrop key={i} drop={d} t={t} width={width} height={height} color={colors[d.color % colors.length]} />
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   box: { overflow: 'visible' },
   piece: { position: 'absolute', left: '50%', top: '50%' },
+  drop: { position: 'absolute', left: 0, top: 0 },
 });

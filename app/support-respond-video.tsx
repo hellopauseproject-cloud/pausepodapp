@@ -8,6 +8,7 @@ import {
   Text, TouchableOpacity, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { OpensPicker, SealedSendOverlay, SEALED_SEND_MS } from '../components/opens-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { track } from '../lib/analytics';
 import { supabase } from '../lib/supabase';
@@ -50,6 +51,7 @@ export default function SupportRespondVideoScreen() {
   const st = useMemo(() => makeSt(Palette), [Palette]);
   const { user } = useAuth();
   const { storyId, ownerName } = useLocalSearchParams<{ storyId: string; ownerName: string }>();
+  const [sealed, setSealed] = useState(false);
   const insets = useSafeAreaInsets();
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -193,12 +195,15 @@ export default function SupportRespondVideoScreen() {
         sender_id: user.id,
         response_type: 'video',
         content_url: contentUrl,
+        // Försluten tills mottagaren gjort en paus (supabase/support_sealed.sql).
+        // Bara när den är vald, så att *Now* fungerar mot en databas utan kolumnen.
+        ...(sealed ? { opens_after_pause: true } : {}),
       });
       if (dbError) throw dbError;
 
-      track('support_response_sent', { response_type: 'video' });
+      track('support_response_sent', { response_type: 'video', sealed });
       setPhase('sent');
-      setTimeout(() => router.back(), 900);
+      setTimeout(() => router.back(), sealed ? SEALED_SEND_MS : 900);
     } catch (e: any) {
       setErrorMsg('Upload error: ' + (e?.message ?? JSON.stringify(e)));
       setPhase('reviewing');
@@ -274,6 +279,9 @@ export default function SupportRespondVideoScreen() {
         )}
 
         {phase === 'reviewing' && (
+          <OpensPicker sealed={sealed} onChange={setSealed} ownerName={ownerName ?? ''} onDark />
+        )}
+        {phase === 'reviewing' && (
           <View style={st.reviewActions}>
             <TouchableOpacity style={st.reRecordBtn} onPress={handleReRecord} activeOpacity={0.75}>
               <FontAwesome5 name="redo" size={13} color={Palette.ink70} />
@@ -308,6 +316,7 @@ export default function SupportRespondVideoScreen() {
           </View>
         )}
       </View>
+      {phase === 'sent' && sealed && <SealedSendOverlay />}
     </View>
   );
 }

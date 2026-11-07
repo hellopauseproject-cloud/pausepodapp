@@ -28,7 +28,8 @@ import { GLOBAL_PAUSE_NAME } from '../lib/notifications';
  *
  * **Jordklotet är namnet** i alla lägen; namnet står bara i
  * `accessibilityLabel`. Texten: *Next · 18:00*, *Tomorrow · 18:00*,
- * *In 1h 20min*, *12 pausing now* och *Done* (en kvart efter slutet).
+ * *In 1h 20min*, *12 pausing now* (*Join Global Pause* när ingen pausar än)
+ * och *Done* (en kvart efter slutet).
  *
  * Hem placerar den (`GLOBAL_PAUSE_LINE_H` är dess höjd).
  */
@@ -95,8 +96,13 @@ export function GlobalPauseLine() {
 
   if (!pause) return <View style={styles.slot} />;
 
+  // Ingen som pausar ännu: en inbjudan i stället för en nolla, så länge dörren
+  // står öppen. Efter dörren går det inte att gå med, och då står bara att den pågår.
+  const doorOpen = now <= new Date(pause.closes_at).getTime();
   const value = live
-    ? `${pause.counts.pausing} pausing now`
+    ? pause.counts.pausing > 0
+      ? `${pause.counts.pausing} pausing now`
+      : doorOpen ? 'Join Global Pause' : 'Global Pause now'
     : pause.last
       ? 'Done'
       : starts - now <= GLOBAL_PAUSE_NEAR_MS

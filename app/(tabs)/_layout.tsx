@@ -305,9 +305,12 @@ export default function TabLayout() {
       <Tabs.Screen
         name="friends"
         options={{
-          title: 'Friends',
+          // Fliken heter Support: stödet är sidans huvudsak, och vänlistan är
+          // vilka man kan be om det. Rutten och rummet heter fortfarande
+          // `friends`, samma linje som `Palette.community`.
+          title: 'Support',
           tabBarIcon: ({ color }) => (
-            <FontAwesome5 name="user-friends" size={18} color={color} />
+            <FontAwesome5 name="hand-holding-heart" size={18} color={color} />
           ),
           // Samma siffra som i Circle. De tre talen är vänförfrågningar,
           // pausinbjudningar och oöppnade stödsvar — allt som väntar på ett

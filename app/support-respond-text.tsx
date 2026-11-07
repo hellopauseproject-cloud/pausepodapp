@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView, Platform, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import { OpensPicker, SealedSendOverlay, SEALED_SEND_MS } from '../components/opens-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { track } from '../lib/analytics';
 import { supabase } from '../lib/supabase';
@@ -38,6 +39,7 @@ function SupportRespondTextScreen() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [sealed, setSealed] = useState(false);
 
   const handleSend = async () => {
     if (!user || !text.trim() || sending || !storyId) return;
@@ -47,13 +49,16 @@ function SupportRespondTextScreen() {
       sender_id: user.id,
       response_type: 'text',
       text_content: text.trim(),
+      // Försluten tills mottagaren gjort en paus (supabase/support_sealed.sql).
+      // Bara när den är vald, så att *Now* fungerar mot en databas utan kolumnen.
+      ...(sealed ? { opens_after_pause: true } : {}),
     });
     if (!error) {
       // Längden, inte texten: ett stödsvar är det mest privata appen bär,
       // och händelseloggen behöver bara veta att det skickades.
-      track('support_response_sent', { response_type: 'text', length: text.trim().length });
+      track('support_response_sent', { response_type: 'text', length: text.trim().length, sealed });
       setSent(true);
-      setTimeout(() => router.back(), 900);
+      setTimeout(() => router.back(), sealed ? SEALED_SEND_MS : 900);
     } else {
       setSending(false);
     }
@@ -76,7 +81,6 @@ function SupportRespondTextScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        <Text style={s.subtitle}>Your text message will be delivered when {ownerName} opens the app.</Text>
 
         <TextInput
           style={s.input}
@@ -91,6 +95,8 @@ function SupportRespondTextScreen() {
         />
         <Text style={s.charCount}>{300 - text.length}</Text>
 
+        <OpensPicker sealed={sealed} onChange={setSealed} ownerName={ownerName ?? ''} />
+
         <TouchableOpacity
           style={[s.sendBtn, (!text.trim() || sending || sent) && s.sendBtnDisabled]}
           onPress={handleSend}
@@ -103,6 +109,7 @@ function SupportRespondTextScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+      {sent && sealed && <SealedSendOverlay />}
       </DismissKeyboardView>
     </KeyboardAvoidingView>
   );
@@ -122,7 +129,6 @@ const makeS = (Palette: AppPalette) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   closeBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'flex-start' },
   title: { fontSize: 17, fontWeight: '700', color: Palette.textPrimary, letterSpacing: 0.2 },
-  subtitle: { fontSize: 14, color: Palette.textTertiary, lineHeight: 20 },
   input: {
     backgroundColor: Palette.surface, borderRadius: Radius.md,
     borderWidth: 1, borderColor: Palette.surfaceBorder,

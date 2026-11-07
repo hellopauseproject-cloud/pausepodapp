@@ -5,6 +5,7 @@ import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, To
 import { AppPalette, Radius, Spacing, alpha, darkPalette, lightPalette } from '../constants/appTheme';
 import { RoomProvider, ThemePreference, usePalette, useTheme } from '../contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PodBoxIcon } from '../components/pod-box-icon';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { track } from '../lib/analytics';
 import { fetchMyTags, formatTagUid, type MyTag, removeMyTag } from '../lib/tagPairing';
@@ -148,10 +149,14 @@ function SettingsScreen() {
 
       {/* PAUSE POD: taggregistrering — samma skärm som lådans QR-kod öppnar */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Pause Pod</Text>
+        {/* Lådan i hörnet, samma som på en lådpaus i statistiken. */}
+        <View style={styles.podTitleRow}>
+          <PodBoxIcon width={40} />
+          <Text style={[styles.sectionTitle, styles.podTitle]}>PausePod</Text>
+        </View>
         <Text style={styles.sectionSubtitle}>
           {myTags && myTags.length > 0
-            ? 'The box says hi when it reads these tags.'
+            ? 'Your PausePod knows you by these tags.'
             : 'New tag on your phone? Enter the code from the box.'}
         </Text>
         {myTags && myTags.length > 0 && (
@@ -242,6 +247,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     color: Palette.textPrimary,
     marginBottom: 6,
   },
+  podTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+  podTitle: { marginBottom: 0 },
   sectionSubtitle: {
     fontSize: 14,
     color: Palette.textSecondary,

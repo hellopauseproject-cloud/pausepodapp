@@ -1,4 +1,5 @@
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -20,7 +21,7 @@ import {
   View,
 } from 'react-native';
 import Reanimated, {
-  cancelAnimation, Easing as REasing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming,
+  cancelAnimation, Easing as REasing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withSpring, withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppPalette, Radius, Spacing, alpha } from '../../constants/appTheme';
@@ -32,6 +33,7 @@ import {
 } from '../../lib/pauseInvites';
 import { RoomProvider, usePalette } from '../../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../../components/screen-background';
+import { PausePodLogo } from '../../components/pause-pod-logo';
 import { CircleLevelBadge } from '../../components/circle-level-badge';import { circleLevelName } from '../../lib/circleLevels';
 import { FriendCircleBadge, getFriendCircleBadge } from '../../lib/circles';
 import { track } from '../../lib/analytics';
@@ -40,10 +42,22 @@ import { enablePushNotifications } from '../../lib/notifications';
 import { startSleep } from '../../lib/sleep';
 import { supabase } from '../../lib/supabase';
 import { liveStoryFilter, storyTimeLeft, unopenedResponsesQuery } from '../../lib/supportStories';
+import { fetchUnseenThanks, markThanksSeen, SupportThanks } from '../../lib/supportThanks';
+import { fetchSealedSupport, SealedSupport } from '../../lib/supportSealed';
+import { openPauseStart } from '../../lib/pauseFlow';
+import { ENVELOPE } from '../../components/support-envelope';
+import { intentionTone } from '../../components/pause-tag-chips';
 import type { PauseSession, Profile } from '../../types/database';
 import { Category, DEFAULT_CATEGORIES, getSelectedCategories } from '../pauseLogger';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+/** Mitt svar på en förfrågan. `thankedAt`: mottagaren har skickat ett hjärta tillbaka. */
+type RespondedInfo = {
+  id: string; deliveredAt: string | null; thankedAt?: string | null;
+  /** Förseglat svar som mottagaren inte öppnat än (supabase/support_sealed.sql). */
+  sealed?: boolean;
+};
 
 type SupportStory = {
   id: string;
@@ -57,6 +71,8 @@ type SupportStory = {
    *  stöd-förfrågan. Då bär `support_type` tonen och `activity` punktens text. */
   wishlist_item_id?: string | null;
   expires_at?: string | null;
+  /** Null = alla vänner; annars de som valts (supabase/wishlist.sql). */
+  recipient_ids?: string[] | null;
   profile: { id: string; username: string; avatar_url: string | null } | null;
 };
 
@@ -457,7 +473,7 @@ const FriendRow = memo(function FriendRow({
         activeOpacity={0.75}
       >
         <View style={styles.friendAvatar}>
-          <Avatar username={friend.username} avatarUrl={friend.avatar_url} size={50} />
+          <Avatar username={friend.username} avatarUrl={friend.avatar_url} size={38} />
           {isPausing && <PulseDot color={Palette.accent} borderColor={Palette.surface} />}
         </View>
         <View style={styles.friendInfo}>
@@ -489,7 +505,7 @@ const FriendRow = memo(function FriendRow({
             för ifyllt är accentens (se CLAUDE.md, *Rummet*). */}
         {!isPausing && (
           <View style={styles.iconBtnWrap}>
-            <PingRing trigger={invitePing} color={Palette.accent} size={42} duration={1000} />
+            <PingRing trigger={invitePing} color={Palette.accent} size={36} duration={1000} />
             <TouchableOpacity
               style={[styles.iconBtn, inviteOpen && styles.iconBtnSent]}
               onPress={() => onInvite(friend)}
@@ -606,117 +622,316 @@ function FriendWeekStats({ friendId }: { friendId: string }) {
   );
 }
 
-// ─── Story bubbles (horisontell rad) ─────────────────────────────────────────
+// ─── Stödförfrågningar ───────────────────────────────────────────────────────
+//
+// Cirklar i en rad, som stories. **Den egna står alltid först**, skild från
+// vännernas med en tunn lodrät linje, och den är ens eget ansikte i båda
+// lägena: utan förfrågan med ett fyllt plus i hörnet och etiketten *Ask*,
+// med en ute med en grön ring (`peer`) och etiketten *Your request*. Samma
+// mönster som "Your story" — man ser direkt vilken cirkel som är ens egen.
+//
+// Två andra försök föll på begäran: stora kort med toning, toner och en
+// rubrik (*Anna needs you*) var plottriga, och små kort med text var
+// otydliga. Cirklarna var det som fungerade.
 
-const BUBBLE_D = 68;
+const BUBBLE_D = 76;
 
 function StoryBubble({
-  username, avatarUrl, ringColor, dimmed, onPress, isPlus, plusOpen = false, pingKey = 0,
+  username, avatarUrl, label, ringColor, dimmed, hearted, plus, onPress, accessibilityLabel,
 }: {
   username: string; avatarUrl?: string | null;
-  ringColor: string; dimmed?: boolean;
-  onPress: () => void; isPlus?: boolean;
-  /** Plusset vrids till ett kryss medan förfrågningsarket är öppet. */
-  plusOpen?: boolean;
-  /** Ringen pingar en gång när talet ökar. */
-  pingKey?: number;
+  label: string;
+  ringColor: string;
+  /** Besvarad: tonad, med en bock. */
+  dimmed?: boolean;
+  /** Svaret fick ett hjärta tillbaka: hjärta i stället för bock, och inte tonad. */
+  hearted?: boolean;
+  /** Den egna utan förfrågan: ett fyllt plus i hörnet och en streckad ring. */
+  plus?: boolean;
+  onPress: () => void;
+  accessibilityLabel: string;
 }) {
   const Palette = usePalette();
-  const bubbleStyles = useMemo(() => makeBubbleStyles(Palette), [Palette]);
-  const firstName = username.split(' ')[0];
-  const reduceMotion = useReducedMotion();
-  const turn = useSharedValue(plusOpen ? 1 : 0);
-  useEffect(() => {
-    turn.value = reduceMotion ? (plusOpen ? 1 : 0) : withTiming(plusOpen ? 1 : 0, { duration: 300 });
-  }, [plusOpen, reduceMotion, turn]);
-  const plusStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${turn.value * 45}deg` }] }));
+  const s = useMemo(() => makeRequestStyles(Palette), [Palette]);
   return (
-    <TouchableOpacity style={bubbleStyles.wrap} onPress={onPress} activeOpacity={0.75}>
-      <View style={[bubbleStyles.ring, { borderColor: dimmed ? alpha(Palette.community, 0.2) : ringColor }]}>
-        <PingRing trigger={pingKey} color={ringColor} size={BUBBLE_D + 14} />
-        {isPlus ? (
-          <Reanimated.View style={[bubbleStyles.plusCircle, plusStyle]}>
-            <FontAwesome5 name="plus" size={22} color={Palette.community} />
-          </Reanimated.View>
-        ) : (
-          <View style={{ opacity: dimmed ? 0.45 : 1 }}>
-            <Avatar username={username} avatarUrl={avatarUrl} size={BUBBLE_D} />
+    <TouchableOpacity
+      style={s.bubble}
+      onPress={onPress}
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <View style={[s.ring, { borderColor: ringColor }, plus && s.ringPlus, dimmed && !hearted && s.ringDimmed]}>
+        <View style={dimmed && !hearted && s.faded}>
+          <Avatar username={username} avatarUrl={avatarUrl} size={BUBBLE_D} />
+        </View>
+        {plus && (
+          <View style={s.plusBadge}>
+            <FontAwesome5 name="plus" size={10} color={Palette.onAccent} />
           </View>
         )}
-        {dimmed && (
-          <View style={bubbleStyles.checkBadge}>
+        {hearted ? (
+          <View style={s.heartBadge}>
+            <FontAwesome5 name="heart" size={9} solid color={Palette.onAccent} />
+          </View>
+        ) : dimmed && (
+          // Bocken också för ett förseglat svar som inte öppnats än — ett
+          // pausmärke här lästes som att personen pausade.
+          <View style={s.checkBadge}>
             <FontAwesome5 name="check" size={8} color={Palette.onAccent} />
           </View>
         )}
       </View>
-      <Text style={[bubbleStyles.name, dimmed && { opacity: 0.45 }]} numberOfLines={1}>
-        {isPlus ? 'Add request' : firstName}
-      </Text>
+      <Text style={[s.bubbleName, dimmed && !hearted && s.faded]} numberOfLines={1}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-function StoryRow({
-  myStory, stories, respondedMap, onBubblePress, onPlusPress, plusOpen, pingKey,
+function SupportRequests({
+  me, myStory, stories, respondedMap, onOpen, onAskPress,
 }: {
+  me: { username: string; avatar_url: string | null } | null;
   myStory: SupportStory | null;
   stories: SupportStory[];
-  respondedMap: Record<string, { id: string; deliveredAt: string | null }>;
-  onBubblePress: (index: number) => void;
-  onPlusPress: () => void;
-  plusOpen: boolean;
-  pingKey: number;
+  respondedMap: Record<string, RespondedInfo>;
+  /** Index i story-läsarens lista: den egna först, sedan vännernas. */
+  onOpen: (index: number) => void;
+  onAskPress: () => void;
 }) {
   const Palette = usePalette();
-  const bubbleStyles = useMemo(() => makeBubbleStyles(Palette), [Palette]);
-  // Rubriken är ett substantiv och står alltid. "Ask for support" över
-  // vännernas ansikten lästes som en uppmaning att be *dem* om stöd, när
-  // raden visar att de ber *dig*. Och utan rubrik var plusset en okänd bubbla
-  // precis när en förklaring behövdes mest.
+  const s = useMemo(() => makeRequestStyles(Palette), [Palette]);
+  const offset = myStory ? 1 : 0;
+  // Obesvarade först; en besvarad cirkel står kvar längst bak, tonad.
+  const ordered = stories
+    .map((story, i) => ({ story, index: offset + i, responded: !!respondedMap[story.id] }))
+    .sort((a, b) => Number(a.responded) - Number(b.responded));
+  const myName = myStory?.profile?.username ?? me?.username ?? 'You';
+  const myAvatar = myStory?.profile?.avatar_url ?? me?.avatar_url ?? null;
+
   return (
-    <View style={bubbleStyles.section}>
-      <Text style={bubbleStyles.sectionLabel}>Support requests</Text>
+    <View style={s.wrap}>
+      <Text style={s.eyebrow}>SUPPORT REQUESTS</Text>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={bubbleStyles.row}
+        style={s.row}
+        contentContainerStyle={s.rowContent}
       >
         {myStory ? (
           <StoryBubble
-            username={myStory.profile?.username ?? '?'}
-            avatarUrl={myStory.profile?.avatar_url}
+            username={myName}
+            avatarUrl={myAvatar}
+            label="Your request"
             ringColor={Palette.peer}
-            onPress={() => onBubblePress(0)}
-            // Den egna bubblan ersätter plusset när förfrågan gått ut, och
-            // det är den som pingar: "din fråga är ute".
-            pingKey={pingKey}
+            onPress={() => onOpen(0)}
+            accessibilityLabel={`Your request: ${myStory.activity}. ${storyTimeLeft(myStory)}.`}
           />
         ) : (
           <StoryBubble
-            username="Add request"
-            ringColor={Palette.community}
-            isPlus
-            plusOpen={plusOpen}
-            onPress={onPlusPress}
+            username={myName}
+            avatarUrl={myAvatar}
+            label="Ask"
+            ringColor={Palette.ink22}
+            plus
+            onPress={onAskPress}
+            accessibilityLabel="Ask for support"
           />
         )}
-        {stories.map((story, i) => (
-          <StoryBubble
-            key={story.id}
-            username={story.profile?.username ?? '?'}
-            avatarUrl={story.profile?.avatar_url}
-            ringColor={Palette.community}
-            dimmed={!!respondedMap[story.id]}
-            onPress={() => onBubblePress((myStory ? 1 : 0) + i)}
-          />
-        ))}
+
+        <View style={s.divider} />
+
+        {ordered.length > 0 ? ordered.map(o => {
+          const name = o.story.profile?.username ?? 'A friend';
+          return (
+            <StoryBubble
+              key={o.story.id}
+              username={name}
+              avatarUrl={o.story.profile?.avatar_url}
+              label={name.split(' ')[0]}
+              ringColor={Palette.community}
+              dimmed={o.responded}
+              hearted={!!respondedMap[o.story.id]?.thankedAt}
+              onPress={() => onOpen(o.index)}
+              accessibilityLabel={`${name}: ${o.story.activity}. ${respondedMap[o.story.id]?.thankedAt ? 'Support sent, and they sent a heart back.' : o.responded ? 'Support sent.' : 'Open to send support.'}`}
+            />
+          );
+        }) : (
+          <View style={s.emptyWrap}>
+            <Text style={s.empty}>{"Friends' requests\nshow up here"}</Text>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
 }
 
+const makeRequestStyles = (Palette: AppPalette) => StyleSheet.create({
+  // Luft ovanför, så att raden står längre ner och inte trängs mot rubriken,
+  // och lika mycket under, så att den hålls isär från vänlistan.
+  wrap: { marginTop: Spacing.xl, marginBottom: Spacing.xl },
+  eyebrow: { ...Palette.eyebrow, marginBottom: 12 },
+  // Raden går ut till skärmens kanter, så att nästa cirkel skymtar.
+  row: { marginHorizontal: -Spacing.xl },
+  rowContent: { paddingHorizontal: Spacing.xl, gap: 14, alignItems: 'flex-start', paddingVertical: 2 },
+  bubble: { alignItems: 'center', gap: 6, width: BUBBLE_D + 12 },
+  ring: {
+    width: BUBBLE_D + 8, height: BUBBLE_D + 8, borderRadius: (BUBBLE_D + 8) / 2,
+    borderWidth: 2.5, alignItems: 'center', justifyContent: 'center',
+  },
+  ringPlus: { borderStyle: 'dashed', borderWidth: 1.5 },
+  ringDimmed: { borderColor: Palette.ink22 },
+  faded: { opacity: 0.45 },
+  plusBadge: {
+    position: 'absolute', right: 0, bottom: 0,
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: Palette.accent,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2.5, borderColor: Palette.bg,
+  },
+  checkBadge: {
+    position: 'absolute', right: 0, bottom: 0,
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: Palette.community,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Palette.bg,
+  },
+  heartBadge: {
+    position: 'absolute', right: -2, bottom: -2,
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: Palette.dangerSoft,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Palette.bg,
+  },
+  bubbleName: { fontSize: 12, color: Palette.textSecondary, textAlign: 'center', maxWidth: BUBBLE_D + 12 },
+  // Linjen mellan den egna och vännernas — det enda som behövs för att
+  // läsa "jag" mot "de".
+  divider: { width: 1, height: BUBBLE_D - 8, marginTop: 8, backgroundColor: Palette.ink15 },
+  emptyWrap: { height: BUBBLE_D + 8, justifyContent: 'center' },
+  empty: { fontSize: 13, lineHeight: 18, color: Palette.textTertiary },
+});
+
+/**
+ * Förseglat stöd: *Dag sent you support · Take a pause to open*. Ett kuvert
+ * med pausens sigill, och knappen startar en paus. Innehållet går inte att
+ * läsa förrän pausen är gjord — det spärras i SQL (supabase/support_sealed.sql),
+ * och Hem säger *Your envelope is ready* när det låsts upp.
+ */
+function SealedCard({ sealed }: { sealed: SealedSupport[] }) {
+  const Palette = usePalette();
+  const s = useMemo(() => makeInboxStyles(Palette), [Palette]);
+  const first = sealed[0];
+  const firstName = first.username.split(' ')[0];
+  const title = sealed.length === 1
+    ? `${firstName} sent you support`
+    : `${sealed.length} sealed envelopes`;
+  return (
+    <View style={s.sealedCard}>
+      <View style={s.sealedEnvelope}>
+        <FontAwesome5 name="envelope" size={26} color={ENVELOPE.flap} solid />
+        <View style={s.sealedSeal}>
+          <View style={s.sealedSealBar} />
+          <View style={s.sealedSealBar} />
+        </View>
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={s.inboxTitle} numberOfLines={2}>{title}</Text>
+        <Text style={s.thanksSub}>Take a pause to open.</Text>
+      </View>
+      <TouchableOpacity
+        style={s.sealedBtn}
+        onPress={() => openPauseStart('push')}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Start a pause to open it"
+      >
+        <FontAwesome5 name="pause" size={11} color={Palette.onAccent} />
+        <Text style={s.sealedBtnText}>Pause</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/**
+ * *Anna sent you a heart* — ett hjärta tillbaka för stöd man skickat
+ * (supabase/support_thanks.sql). Det visas en gång: raderna markeras sedda när
+ * de hämtats, och kortet står kvar tills fliken lämnas. Hjärtat studsar in,
+ * för det här är det enda ögonblicket avsändaren får veta att stödet nådde fram.
+ */
+function ThanksCard({ thanks }: { thanks: SupportThanks[] }) {
+  const Palette = usePalette();
+  const s = useMemo(() => makeInboxStyles(Palette), [Palette]);
+  const reduceMotion = useReducedMotion();
+  const pop = useSharedValue(reduceMotion ? 1 : 0.4);
+  useEffect(() => {
+    if (reduceMotion) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    pop.value = withSpring(1, { damping: 7, stiffness: 160 });
+  }, [reduceMotion, pop]);
+  const heartStyle = useAnimatedStyle(() => ({ transform: [{ scale: pop.value }] }));
+  const first = thanks[0];
+  const firstName = first.username.split(' ')[0];
+  const others = new Set(thanks.map(t => t.userId)).size - 1;
+  const title = others <= 0
+    ? `${firstName} sent you a heart`
+    : `${firstName} and ${others} ${others === 1 ? 'other' : 'others'} sent you hearts`;
+  const sub = thanks.length === 1 && first.activity
+    ? `For your support with ${first.activity}`
+    : 'For the support you sent';
+  return (
+    <View style={s.thanksCard} accessibilityRole="text" accessibilityLabel={`${title}. ${sub}.`}>
+      <View>
+        <Avatar username={first.username} avatarUrl={first.avatarUrl} size={48} />
+        <Reanimated.View style={[s.thanksHeart, heartStyle]}>
+          <FontAwesome5 name="heart" size={12} solid color={Palette.onAccent} />
+        </Reanimated.View>
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={s.inboxTitle} numberOfLines={2}>{title}</Text>
+        <Text style={s.thanksSub} numberOfLines={2}>{sub}</Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Stöd som väntar, överst i fliken. Det ersatte två små ikoner på rubrikraden
+ * (en lur och ett kuvert) som var lätta att missa — och luren lovade ett
+ * samtal. Ett tryck öppnar kuvertet i app/support-arrived.tsx.
+ */
+function SupportInboxCard({ count, senderName, senderAvatarUrl, onPress }: {
+  count: number; senderName: string; senderAvatarUrl: string | null; onPress: () => void;
+}) {
+  const Palette = usePalette();
+  const inboxStyles = useMemo(() => makeInboxStyles(Palette), [Palette]);
+  const firstName = senderName.split(' ')[0];
+  return (
+    <TouchableOpacity
+      style={inboxStyles.inboxCard}
+      onPress={onPress}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={count === 1 ? `${firstName} sent you support. Open it.` : `${count} messages of support waiting. Open them.`}
+    >
+      <View style={inboxStyles.inboxIcon}>
+        <PingRing trigger={count} color={Palette.community} size={60} />
+        <FontAwesome5 name="envelope" size={22} color={Palette.community} solid />
+        <View style={inboxStyles.inboxAvatar}>
+          <Avatar username={senderName} avatarUrl={senderAvatarUrl} size={22} />
+        </View>
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={inboxStyles.inboxTitle} numberOfLines={2}>
+          {count === 1 ? `${firstName} sent you support` : `${count} messages of support`}
+        </Text>
+        <Text style={inboxStyles.inboxSub}>Open the envelope</Text>
+      </View>
+      <FontAwesome5 name="chevron-right" size={14} color={Palette.hue} />
+    </TouchableOpacity>
+  );
+}
+
 function StoryDetailModal({
-  items, initialIndex, myUserId,
+  items, initialIndex, myUserId, friendNames,
   respondedMap, onUndoResponse,
   onRespondText, onRespondVoice, onRespondVideo, onRespondPhoto,
   onDeactivateOwn, onClose,
@@ -724,7 +939,9 @@ function StoryDetailModal({
   items: SupportStory[];
   initialIndex: number;
   myUserId: string;
-  respondedMap: Record<string, { id: string; deliveredAt: string | null }>;
+  /** Vännernas namn per id, för *Asked Anna, Dag* på den egna förfrågan. */
+  friendNames: Record<string, string>;
+  respondedMap: Record<string, RespondedInfo>;
   onUndoResponse: (storyId: string) => Promise<void>;
   onRespondText: (storyId: string, ownerName: string) => void;
   onRespondVoice: (storyId: string, ownerName: string) => void;
@@ -816,6 +1033,14 @@ function StoryDetailModal({
                 är ledigt. */}
             <Text style={storyModalStyles.timeLeftText}>{storyTimeLeft(item)}</Text>
           </View>
+
+          {isOwn && (
+            <Text style={storyModalStyles.audienceText}>
+              {!item.recipient_ids
+                ? 'Asked all your friends'
+                : `Asked ${item.recipient_ids.map(id => friendNames[id]?.split(' ')[0]).filter(Boolean).join(', ') || `${item.recipient_ids.length} friends`}`}
+            </Text>
+          )}
 
           {isOwn ? (
             <TouchableOpacity style={storyModalStyles.deactivateBtn} onPress={onDeactivateOwn} activeOpacity={0.8}>
@@ -934,19 +1159,24 @@ function FriendsScreen() {
   const friendIdsRef = useRef<string[]>([]);
   const [stories, setStories] = useState<SupportStory[]>([]);
   const [myStory, setMyStory] = useState<SupportStory | null>(null);
-  const [respondedMap, setRespondedMap] = useState<Record<string, { id: string; deliveredAt: string | null }>>({}); // storyId → { id, deliveredAt }
+  // Det egna ansiktet till den första cirkeln, också när ingen förfrågan är ute.
+  const [me, setMe] = useState<{ username: string; avatar_url: string | null } | null>(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    let alive = true;
+    supabase.from('profiles').select('username, avatar_url').eq('id', user.id).maybeSingle()
+      .then(({ data }) => { if (alive && data) setMe({ username: data.username ?? 'You', avatar_url: data.avatar_url ?? null }); });
+    return () => { alive = false; };
+  }, [user?.id]);
+  const [respondedMap, setRespondedMap] = useState<Record<string, RespondedInfo>>({}); // storyId → { id, deliveredAt }
   const [storyModalIndex, setStoryModalIndex] = useState<number | null>(null);
 
-  // Inkorgen för stöd-svar. Låg på Hem förut, men hör hemma här: det är
-  // Community-innehåll, och Hem behövde botten fri. Flikens egen badge i
-  // (tabs)/_layout.tsx räknar in dem, så man ser dem utan att besöka fliken.
-  //
-  // Två kanaler och inte fyra: luren är det som ringer (röst och video), och
-  // kuvertet är det som bara ligger där (text och foto). Fotot fick alltså
-  // ingen egen knapp — tre ikoner på rubrikraden hade gjort den till en
-  // verktygslåda, samma skäl som kretsens rubrikrad inte fick en tredje.
-  const [pendingVoiceVideo, setPendingVoiceVideo] = useState(0);
-  const [pendingQuiet, setPendingQuiet] = useState(0);
+  // Inkorgen för stöd-svar: ett kort överst i fliken, inte två ikoner på
+  // rubrikraden. Förr var luren det som ringde (röst och video) och kuvertet
+  // det som låg tyst (text och foto); nu landar alla fyra sorterna i samma
+  // kuvert (app/support-arrived.tsx), och kortet är fliken huvudsak när det
+  // finns något. Flikens egen badge i (tabs)/_layout.tsx räknar in dem.
+  const [inbox, setInbox] = useState<{ count: number; senderName: string; senderAvatarUrl: string | null } | null>(null);
 
   // Vänradernas tryck, stabila så att `FriendRow`s memo håller. Veckan fälls
   // ut i själva kortet (`FriendWeekStats`) och behöver ingen callback.
@@ -993,10 +1223,15 @@ function FriendsScreen() {
     const hide = Keyboard.addListener(hideEvt, () => setStoryKeyboard(0));
     return () => { show.remove(); hide.remove(); setStoryKeyboard(0); };
   }, [storySheet]);
-  // Ökar när en förfrågan publicerats, och får den egna bubblans ring att
-  // pinga en gång. Noll vid montering, så att ingenting pingar vid laddning.
-  const [storyPingKey, setStoryPingKey] = useState(0);
-  const [storyStep, setStoryStep] = useState<1 | 2>(1);
+  const [storyStep, setStoryStep] = useState<1 | 2 | 3>(1);
+  // Vem förfrågan går till: tomt = alla vänner (förval), annars de ikryssade.
+  // Skickas som `p_recipient_ids` till activate_story (supabase/wishlist.sql).
+  const [storyRecipients, setStoryRecipients] = useState<Set<string>>(new Set());
+  const audienceLabel = (() => {
+    if (storyRecipients.size === 0) return 'Everyone';
+    const names = friends.filter(fr => storyRecipients.has(fr.id)).map(fr => fr.username.split(' ')[0]);
+    return names.length <= 2 ? names.join(', ') : `${names.length} friends`;
+  })();
   const [storyItems, setStoryItems] = useState<{ id: string; text: string }[]>([]);
   const [storyPickedId, setStoryPickedId] = useState<string | null>(null);
   const [storyCategory, setStoryCategory] = useState<Category | null>(null);
@@ -1021,6 +1256,7 @@ function FriendsScreen() {
     setStoryCategory(null);
     setStoryFreeText('');
     setStoryTypes([]);
+    setStoryRecipients(new Set());
     setStorySheet(true);
     if (!user) return;
     const { data } = await supabase
@@ -1044,6 +1280,9 @@ function FriendsScreen() {
         p_tone: storyTypes.join(','),
         p_intention_id: storyCategory?.id ?? null,
         p_activity: storyPickedId ? null : storySubject,
+        // Bara när man valt: då fungerar *alla vänner* också mot en databas
+        // där wishlist.sql inte körts om än.
+        ...(storyRecipients.size > 0 ? { p_recipient_ids: [...storyRecipients] } : {}),
       });
       if (error) throw new Error(error.message);
 
@@ -1058,11 +1297,13 @@ function FriendsScreen() {
         from_wishlist: !!storyPickedId,
         tones: storyTypes.length,
         has_category: !!storyCategory,
+        // Antalet och inte vilka: vilka man ber är deras sak.
+        audience: storyRecipients.size > 0 ? 'chosen' : 'all',
+        recipients: storyRecipients.size > 0 ? storyRecipients.size : null,
       });
 
       setStorySheet(false);
       fetchStories();
-      setStoryPingKey(k => k + 1);
     } catch (e: any) {
       Alert.alert('Could not share', e.message);
     } finally {
@@ -1162,12 +1403,17 @@ function FriendsScreen() {
   const fetchStories = useCallback(async () => {
     if (!user) return;
     // Varje förfrågan faller ur raden efter 24 timmar — se lib/supportStories.ts.
-    const { data } = await supabase
+    // `recipient_ids` finns först när wishlist.sql körts om; utan den faller
+    // frågan tillbaka på de gamla kolumnerna i stället för att tömma raden.
+    const storyQuery = (cols: string) => supabase
       .from('support_stories')
-      .select('id, user_id, support_type, activity, intention_id, personal_note, created_at, wishlist_item_id, expires_at, profile:profiles!user_id(id, username, avatar_url)')
+      .select(cols)
       .eq('is_active', true)
       .or(liveStoryFilter())
       .order('created_at', { ascending: false });
+    const base = 'id, user_id, support_type, activity, intention_id, personal_note, created_at, wishlist_item_id, expires_at, profile:profiles!user_id(id, username, avatar_url)';
+    let { data, error: storyError } = await storyQuery(`${base}, recipient_ids`);
+    if (storyError) ({ data } = await storyQuery(base));
 
     const all = ((data ?? []) as any[]).map(s => ({
       ...s,
@@ -1177,17 +1423,51 @@ function FriendsScreen() {
     setStories(all.filter(s => s.user_id !== user.id));
 
     if (all.length > 0) {
+      // `thanked_at` finns först när supabase/support_thanks.sql körts; utan
+      // den faller frågan tillbaka på de gamla kolumnerna i stället för att
+      // tömma alla bockar.
+      const ids = all.map(s => s.id);
       const { data: myResponses } = await supabase
         .from('support_responses')
-        .select('id, story_id, delivered_at')
+        .select('*')
         .eq('sender_id', user.id)
-        .in('story_id', all.map(s => s.id));
+        .in('story_id', ids);
 
-      const map: Record<string, { id: string; deliveredAt: string | null }> = {};
-      for (const r of (myResponses ?? [])) map[r.story_id] = { id: r.id, deliveredAt: r.delivered_at };
+      const map: Record<string, RespondedInfo> = {};
+      for (const r of ((myResponses ?? []) as any[])) {
+        map[r.story_id] = {
+          id: r.id,
+          deliveredAt: r.delivered_at,
+          thankedAt: r.thanked_at ?? null,
+          sealed: !!r.opens_after_pause && !r.delivered_at,
+        };
+      }
       setRespondedMap(map);
     }
   }, [user]);
+
+  const [thanks, setThanks] = useState<SupportThanks[]>([]);
+  const [sealedSupport, setSealedSupport] = useState<SealedSupport[]>([]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return;
+      let alive = true;
+      fetchSealedSupport().then(list => { if (alive) setSealedSupport(list); });
+      return () => { alive = false; };
+    }, [user?.id])
+  );
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return;
+      let alive = true;
+      fetchUnseenThanks().then(list => {
+        if (!alive || list.length === 0) return;
+        setThanks(list);
+        markThanksSeen(list.map(t => t.responseId));
+      });
+      return () => { alive = false; setThanks([]); };
+    }, [user?.id])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -1195,80 +1475,24 @@ function FriendsScreen() {
       const checkPending = async () => {
         // Svaren överlever förfrågan, så inkorgen räknar svar på alla egna
         // stories — också utgångna och borttagna.
-        const [{ count: vvCount }, { count: quietCount }] = await Promise.all([
-          unopenedResponsesQuery(user.id, 'id', { count: 'exact', head: true })
-            .in('response_type', ['voice', 'video']),
-          unopenedResponsesQuery(user.id, 'id', { count: 'exact', head: true })
-            .in('response_type', ['text', 'photo']),
-        ]);
-
-        setPendingVoiceVideo(vvCount ?? 0);
-        setPendingQuiet(quietCount ?? 0);
+        // Det senaste svaret ger namnet på kortet ("Anna sent you support");
+        // kuvertet öppnar ändå det äldsta först.
+        const { data, count } = await unopenedResponsesQuery(user.id, 'id, sender_id', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const latest = data?.[0];
+        if (!latest || !count) { setInbox(null); return; }
+        const { data: sender } = await supabase
+          .from('profiles').select('username, avatar_url').eq('id', latest.sender_id).maybeSingle();
+        setInbox({
+          count,
+          senderName: sender?.username ?? 'A friend',
+          senderAvatarUrl: sender?.avatar_url ?? null,
+        });
       };
       checkPending();
     }, [user?.id])
   );
-
-  const handleCallChannel = () => {
-    if (pendingVoiceVideo === 0) {
-      Alert.alert('No messages', 'You have no support messages right now.');
-      return;
-    }
-    router.push('/call');
-  };
-
-  // Kuvertets kanal: det äldsta oöppnade svaret som inte ringer, oavsett om
-  // det är skrivet eller fotograferat. Sorten avgör bara vilken skärm som
-  // öppnas — båda är pepp som landat tyst, och båda slutar med samma två val.
-  const handleQuietChannel = async () => {
-    if (!user?.id) return;
-
-    const { data: response } = await unopenedResponsesQuery(
-      user.id, 'id, response_type, text_content, content_url, caption_y, sender_id',
-    )
-      .in('response_type', ['text', 'photo'])
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (response) {
-      const { data: sender } = await supabase
-        .from('profiles')
-        .select('username, avatar_url')
-        .eq('id', response.sender_id)
-        .maybeSingle();
-
-      if (response.response_type === 'photo') {
-        router.push({
-          pathname: '/support-view-photo',
-          params: {
-            messageId: response.id,
-            photoUrl: response.content_url ?? '',
-            caption: response.text_content ?? '',
-            // Null blir en tom sträng här, och visningsskärmen läser den som
-            // "inget sparat läge" och faller tillbaka på mitten.
-            captionY: response.caption_y == null ? '' : String(response.caption_y),
-            senderName: sender?.username ?? 'A friend',
-          },
-        } as any);
-        return;
-      }
-
-      router.push({
-        pathname: '/text-message',
-        params: {
-          messageId: response.id,
-          textContent: response.text_content ?? '',
-          senderName: sender?.username ?? 'A friend',
-          senderAvatarUrl: sender?.avatar_url ?? '',
-          isSupport: 'true',
-        },
-      } as any);
-      return;
-    }
-
-    Alert.alert('No messages', 'You have no support messages right now.');
-  };
 
   // Hänga på en väns paus. Servern avgör om dörren fortfarande står öppen —
   // värden kan ha slutat i sekunden mellan pollningen och trycket.
@@ -1474,41 +1698,33 @@ function FriendsScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.logoRow}>
-          <FontAwesome name="pause" size={16} color={Palette.hue} />
-          <Text style={styles.logoText}>PAUSEPOD</Text>
-        </View>
-        <View style={styles.titleWithInbox}>
-          <Text style={styles.title}>FRIENDS</Text>
-          <View style={styles.inboxRow}>
-            <TouchableOpacity style={styles.inboxBtn} onPress={handleCallChannel} activeOpacity={0.8}>
-              <FontAwesome5 name="phone-alt" size={15} color={Palette.hue} />
-              {pendingVoiceVideo > 0 && (
-                <View style={styles.inboxBadge}>
-                  <Text style={styles.inboxBadgeText}>{pendingVoiceVideo > 9 ? '9+' : pendingVoiceVideo}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.inboxBtn} onPress={handleQuietChannel} activeOpacity={0.8}>
-              {/* Kuvert och inte pratbubbla: knappen är en INKORG för
-                  färdiga pep-meddelanden man fått, inte en ingång till ett
-                  samtal. Bubblan står numera för kretsens chatt, där det
-                  faktiskt går att svara — samma ikon för båda hade lovat
-                  en tråd som inte finns här. Pratbubblan längre upp
-                  (`comment-alt`, bredvid Voice och Video) är kvar: den
-                  väljer ett medium att svara i, och är inte den här.
-                  Kuvertet bär både text och foto, och är fortfarande ett
-                  kuvert: det är vad man öppnar, inte vad som ligger i. */}
-              <FontAwesome5 name="envelope" size={15} color={Palette.hue} solid />
-              {pendingQuiet > 0 && (
-                <View style={styles.inboxBadge}>
-                  <Text style={styles.inboxBadgeText}>{pendingQuiet > 9 ? '9+' : pendingQuiet}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        <PausePodLogo section="Support" />
       </View>
+
+      {/* Stöd som väntar. Kortet är kuvertet i liten skala och leder till
+          app/support-arrived.tsx, där det öppnas. */}
+      {thanks.length > 0 && <ThanksCard thanks={thanks} />}
+
+      {sealedSupport.length > 0 && <SealedCard sealed={sealedSupport} />}
+
+      {inbox && (
+        <SupportInboxCard
+          count={inbox.count}
+          senderName={inbox.senderName}
+          senderAvatarUrl={inbox.senderAvatarUrl}
+          onPress={() => router.push('/support-arrived' as never)}
+        />
+      )}
+
+      {/* Be om stöd, och vänners förfrågningar. */}
+      <SupportRequests
+        me={me}
+        myStory={myStory}
+        stories={stories}
+        respondedMap={respondedMap}
+        onOpen={(index) => setStoryModalIndex(index)}
+        onAskPress={openStorySheet}
+      />
 
       {/* Vänners pauser som pågår och går att hänga på. Ingen väntar på
           svar, så inbjudarens sida har ingenting här. */}
@@ -1556,20 +1772,21 @@ function FriendsScreen() {
         </View>
       )}
 
-      {/* Anrop — story bubbles */}
-      <StoryRow
-        myStory={myStory}
-        stories={stories}
-        respondedMap={respondedMap}
-        onBubblePress={(index) => setStoryModalIndex(index)}
-        onPlusPress={openStorySheet}
-        plusOpen={storySheet}
-        pingKey={storyPingKey}
-      />
-
-      {/* Vänlista */}
+      {/* Vänlista — lugn och liten under förfrågningarna. *Add friend* är en
+          länk på rubrikraden och inte längre en hel knapp under listan. */}
       <View style={styles.section}>
-        <Text style={styles.sectionLabel}>YOUR FRIENDS</Text>
+        <View style={styles.friendsLabelRow}>
+          <Text style={[styles.sectionLabel, { marginBottom: 0 }]}>YOUR FRIENDS</Text>
+          <TouchableOpacity
+            onPress={() => router.push('/add-friend' as never)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.addFriendLink}
+          >
+            <FontAwesome5 name="user-plus" size={12} color={Palette.hue} />
+            <Text style={styles.addFriendLinkText}>Add friend</Text>
+          </TouchableOpacity>
+        </View>
         {friends.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>You don't have any friends yet.</Text>
@@ -1590,16 +1807,6 @@ function FriendsScreen() {
           ))
         )}
       </View>
-
-      {/* Lägg till vän */}
-      <TouchableOpacity
-        style={styles.addFriendBtn}
-        onPress={() => router.push('/add-friend' as never)}
-        activeOpacity={0.85}
-      >
-        <FontAwesome5 name="user-plus" size={14} color={Palette.accent} />
-        <Text style={styles.addFriendText}>Add friend</Text>
-      </TouchableOpacity>
 
       {/* Profilkort */}
       {profileCard && (
@@ -1624,7 +1831,21 @@ function FriendsScreen() {
 
             {storyStep === 1 ? (
               <>
-                <Text style={styles.storyTitle}>Ask for support to…</Text>
+                <View style={styles.storyTitleRow}>
+                  <Text style={[styles.storyTitle, { flex: 1 }]}>Ask for support to…</Text>
+                  {/* Vem: en knapp man går in i. Rörs den inte är det alla. */}
+                  <TouchableOpacity
+                    style={[styles.toPill, storyRecipients.size > 0 && styles.toPillOn]}
+                    onPress={() => setStoryStep(3)}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ask: ${audienceLabel}. Change who you ask.`}
+                  >
+                    <FontAwesome5 name={storyRecipients.size > 0 ? 'user-check' : 'users'} size={11} color={Palette.communitySoft} />
+                    <Text style={styles.toPillText} numberOfLines={1}>{audienceLabel}</Text>
+                    <FontAwesome5 name="chevron-right" size={9} color={Palette.communitySoft} />
+                  </TouchableOpacity>
+                </View>
                 {/* Listan krymper medan man skriver, annars trycker
                     tangentbordet arkets överkant ut ur skärmen på en liten
                     telefon. */}
@@ -1656,18 +1877,38 @@ function FriendsScreen() {
                   })}
 
                   <Text style={styles.storyGroupLabel}>Or something you want to do</Text>
-                  <View style={styles.catRow}>
-                    {inviteCategories.map(c => {
+                  {/* Alla intentioner på en gång, tre i bredd, var och en i sin
+                      egen ton (`intentionTone`, samma som pausens kort i
+                      statistiken). Det var piller i en lång radbrytande rad,
+                      och då gick det inte att se vad som fanns att välja på. */}
+                  <View style={styles.catGrid}>
+                    {inviteCategories.map((c, i) => {
                       const on = storyCategory?.id === c.id;
+                      const tone = intentionTone(Palette, c.id);
                       return (
                         <TouchableOpacity
                           key={c.id}
-                          style={[styles.catChip, on && styles.catChipOn]}
+                          style={[
+                            styles.catTile,
+                            { backgroundColor: alpha(tone, on ? 0.28 : 0.12), borderColor: on ? tone : 'transparent' },
+                            // Luft till höger utom i tredje kolumnen, så att en ofull sista rad står till vänster.
+                            i % 3 !== 2 && styles.catTileGap,
+                          ]}
                           onPress={() => pickCategory(c)}
                           activeOpacity={0.8}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: on }}
+                          accessibilityLabel={c.label}
                         >
-                          <Text style={styles.catChipEmoji}>{c.emoji}</Text>
-                          <Text style={[styles.catChipText, on && styles.catChipTextOn]}>{c.label}</Text>
+                          <Text style={styles.catTileEmoji}>{c.emoji}</Text>
+                          <Text
+                            style={[styles.catTileText, on && { color: tone }]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.85}
+                          >
+                            {c.label}
+                          </Text>
                         </TouchableOpacity>
                       );
                     })}
@@ -1691,7 +1932,7 @@ function FriendsScreen() {
                   <Text style={styles.storyPrimaryText}>Next</Text>
                 </TouchableOpacity>
               </>
-            ) : (
+            ) : storyStep === 2 ? (
               <>
                 <Text style={styles.storyTitle}>What do you need?</Text>
                 <Text style={styles.storySub} numberOfLines={2}>{storySubject}</Text>
@@ -1726,12 +1967,71 @@ function FriendsScreen() {
                   disabled={storyTypes.length === 0 || publishingStory}
                 >
                   <Text style={styles.storyPrimaryText}>
-                    {publishingStory ? 'Sharing…' : 'Share'}
+                    {publishingStory
+                      ? 'Sharing…'
+                      : storyRecipients.size === 0
+                        ? 'Ask everyone'
+                        : `Ask ${storyRecipients.size} ${storyRecipients.size === 1 ? 'friend' : 'friends'}`}
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.storyAlt} onPress={() => setStoryStep(1)}>
                   <Text style={styles.storyAltText}>Back</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                {/* Vem man ber, och en vy man går in i från steg 1. *Everyone*
+                    överst, sedan vännerna med kryssrutor; en vän ikryssad
+                    gör förfrågan riktad, och *Everyone* tömmer valet. Går man
+                    ut utan att kryssa i någon är det alla, som förut. */}
+                <Text style={styles.storyTitle}>Who do you want to ask?</Text>
+                <ScrollView style={styles.recipientList} showsVerticalScrollIndicator={false}>
+                  <TouchableOpacity
+                    style={styles.recipientRow}
+                    onPress={() => setStoryRecipients(new Set())}
+                    activeOpacity={0.75}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: storyRecipients.size === 0 }}
+                  >
+                    <View style={styles.everyoneIcon}>
+                      <FontAwesome5 name="users" size={14} color={Palette.communitySoft} />
+                    </View>
+                    <Text style={styles.recipientName}>Everyone</Text>
+                    <View style={[styles.checkBox, styles.checkRound, storyRecipients.size === 0 && styles.checkBoxOn]}>
+                      {storyRecipients.size === 0 && <FontAwesome5 name="check" size={10} color={Palette.onAccent} />}
+                    </View>
+                  </TouchableOpacity>
+                  <View style={styles.recipientDivider} />
+                  {friends.length === 0 ? (
+                    <Text style={styles.storyEmpty}>You don&apos;t have any friends to choose yet.</Text>
+                  ) : friends.map(fr => {
+                    const on = storyRecipients.has(fr.id);
+                    return (
+                      <TouchableOpacity
+                        key={fr.id}
+                        style={styles.recipientRow}
+                        onPress={() => setStoryRecipients(prev => {
+                          const next = new Set(prev);
+                          if (next.has(fr.id)) next.delete(fr.id); else next.add(fr.id);
+                          return next;
+                        })}
+                        activeOpacity={0.75}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: on }}
+                      >
+                        <Avatar username={fr.username} avatarUrl={fr.avatar_url} size={34} />
+                        <Text style={styles.recipientName} numberOfLines={1}>{fr.username}</Text>
+                        <View style={[styles.checkBox, on && styles.checkBoxOn]}>
+                          {on && <FontAwesome5 name="check" size={10} color={Palette.onAccent} />}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                <TouchableOpacity style={styles.storyPrimary} onPress={() => setStoryStep(1)}>
+                  <Text style={styles.storyPrimaryText}>Done</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -1748,6 +2048,7 @@ function FriendsScreen() {
             items={items}
             initialIndex={Math.min(storyModalIndex, items.length - 1)}
             myUserId={user!.id}
+            friendNames={Object.fromEntries(friends.map(fr => [fr.id, fr.username]))}
             respondedMap={respondedMap}
             onUndoResponse={async (storyId) => {
               const rid = respondedMap[storyId]?.id;
@@ -1794,28 +2095,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
 
   // Header
   header: { gap: Spacing.lg },
-  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logoText: { fontSize: 13, fontWeight: 'bold', color: Palette.hue, letterSpacing: 4 },
-  // Samma rubrik som YOUR PAUSES i statistiken: designsystemets display.
-  title: { fontSize: 26, lineHeight: 30, fontWeight: '900', letterSpacing: -0.6, color: Palette.textPrimary },
-
-  // Inkorgen sitter på samma rad som rubriken, längst till höger. Mindre än
-  // de 64 px de var på Hem — här är de en detalj bredvid en rubrik, inte
-  // skärmens enda handling.
-  titleWithInbox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  inboxRow: { flexDirection: 'row', gap: 10 },
-  inboxBtn: {
-    width: 40, height: 40, borderRadius: Radius.md,
-    backgroundColor: Palette.surface,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  inboxBadge: {
-    position: 'absolute', top: 3, right: 3,
-    minWidth: 16, height: 16, borderRadius: 8,
-    backgroundColor: Palette.accent,
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
-  },
-  inboxBadgeText: { color: Palette.onAccent, fontSize: 11, fontWeight: '700', lineHeight: 13 },
 
   // Dela-en-punkt-lakanet
   storyOverlay: { flex: 1, backgroundColor: Palette.scrim, justifyContent: 'flex-end' },
@@ -1838,19 +2117,18 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     fontSize: 15, fontWeight: '600', color: Palette.accent,
     marginTop: -7, marginBottom: 14,
   },
-  storyList: { maxHeight: 260 },
+  storyList: { maxHeight: 340 },
   storyListKeyboard: { maxHeight: 120 },
   storyGroupLabel: { ...Palette.eyebrow, fontSize: 12, marginBottom: 8, marginTop: 4 },
-  catRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  catChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 9, paddingHorizontal: 12,
-    borderRadius: Radius.pill, backgroundColor: Palette.surface,
+  catGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 8, marginBottom: 4 },
+  catTileGap: { marginRight: '2.75%' },
+  catTile: {
+    width: '31.5%', height: 76, borderRadius: Radius.md,
+    alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderWidth: 1.5, paddingHorizontal: 6,
   },
-  catChipOn: { backgroundColor: Palette.hueTint },
-  catChipEmoji: { fontSize: 14 },
-  catChipText: { fontSize: 14, color: Palette.textSecondary },
-  catChipTextOn: { color: Palette.hue, fontWeight: '700' },
+  catTileEmoji: { fontSize: 24 },
+  catTileText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8, color: Palette.textSecondary },
   // Samma yt-språk som pillren nedan: svag fyllning, hårfin ram, lila när
   // vald. Utan ram och markör blev raden en textfältsattrapp.
   storyOption: {
@@ -1867,6 +2145,35 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     borderWidth: 1.5, borderColor: Palette.ink20,
   },
   optMarkOn: { borderColor: Palette.community, backgroundColor: alpha(Palette.community, 0.2) },
+  storyEmpty: { fontSize: 14, color: Palette.textTertiary, paddingVertical: 8 },
+  recipientList: { maxHeight: 320 },
+  recipientDivider: { height: StyleSheet.hairlineWidth, backgroundColor: Palette.ink15, marginVertical: 4 },
+  everyoneIcon: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: alpha(Palette.community, 0.16),
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkRound: { borderRadius: 11 },
+  storyTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  toPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: 150,
+    paddingVertical: 7, paddingHorizontal: 11, borderRadius: Radius.pill,
+    backgroundColor: alpha(Palette.community, 0.12),
+    borderWidth: 1, borderColor: alpha(Palette.community, 0.3),
+  },
+  toPillOn: { backgroundColor: alpha(Palette.community, 0.22), borderColor: Palette.community },
+  toPillText: { fontSize: 13, fontWeight: '700', color: Palette.communitySoft, flexShrink: 1 },
+  recipientRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 8, paddingHorizontal: 4,
+  },
+  recipientName: { flex: 1, fontSize: 15, fontWeight: '600', color: Palette.textPrimary },
+  checkBox: {
+    width: 22, height: 22, borderRadius: 7,
+    borderWidth: 1.5, borderColor: Palette.ink30,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkBoxOn: { backgroundColor: Palette.accent, borderColor: Palette.accent },
   storyOptionText: { flex: 1, fontSize: 15, color: Palette.ink55 },
   storyOptionTextOn: { color: Palette.communitySoft, fontWeight: '600' },
   storyInput: {
@@ -1970,10 +2277,13 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   // och en ram ovanpå blir en andra gräns för samma kant (samma linje som
   // panelerna i Kretsen). Ingen `overflow: hidden` heller — pingringen runt
   // inbjudningsknappen ska få gå utanför knappen.
-  friendCard: { backgroundColor: Palette.surface, borderRadius: Radius.xl, marginBottom: 10 },
-  friendRow: { flexDirection: 'row', alignItems: 'center', minHeight: 78 },
+  // Vänlistan är fliken bakgrund, inte dess huvudsak: rader utan egen yta,
+  // åtskilda av hårfina linjer, med mindre ansikten och text. Det var kort
+  // på 78 px med 50 px ansikten, och listan blev det som syntes mest.
+  friendCard: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Palette.ink10 },
+  friendRow: { flexDirection: 'row', alignItems: 'center', minHeight: 56 },
   // Utfälld statistik under raden, i samma kort.
-  weekStats: { paddingHorizontal: 18, paddingBottom: 18, paddingTop: 2 },
+  weekStats: { paddingHorizontal: 4, paddingBottom: 16, paddingTop: 2 },
   weekStatsLabel: { ...Palette.eyebrow, color: Palette.textTertiary, marginBottom: 14 },
   weekBars: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   weekBarCol: { flex: 1, alignItems: 'center', gap: 10 },
@@ -1983,14 +2293,14 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   },
   weekBarFill: { width: '100%', borderRadius: 8, backgroundColor: Palette.hue },
   weekBarDay: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, color: Palette.ink55 },
-  friendLeft: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, padding: 14 },
+  friendLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, paddingVertical: 9, paddingRight: 10 },
   friendAvatar: { position: 'relative' },
   friendInfo: { flex: 1, gap: 2 },
-  friendActions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 14 },
+  friendActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Runda knappar i rummets kulör: teckning och ram är `hue`, ytan rummets
   // ton — samma regel som rubrikradens lur och kuvert.
   iconBtn: {
-    width: 38, height: 38, borderRadius: 19,
+    width: 32, height: 32, borderRadius: 16,
     backgroundColor: Palette.hueTint, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1.5, borderColor: alpha(Palette.hue, 0.24),
   },
@@ -1998,7 +2308,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   iconBtnSent: { backgroundColor: Palette.accent, borderColor: Palette.accent },
   // Statistiken är utfälld: ramen tar rummets hela kulör.
   iconBtnOpen: { borderColor: Palette.hue },
-  iconBtnWrap: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  iconBtnWrap: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
 
   // Avatar
   avatarFallback: {
@@ -2007,8 +2317,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   },
   avatarLetter: { color: Palette.textMuted, fontWeight: '700' },
 
-  rowUsername: { fontSize: 17, fontWeight: '700', color: Palette.textPrimary, letterSpacing: 0.2 },
-  statusText: { fontSize: 14, color: Palette.textTertiary, letterSpacing: 0.2 },
+  rowUsername: { fontSize: 15, fontWeight: '600', color: Palette.textPrimary, letterSpacing: 0.2 },
+  statusText: { fontSize: 13, color: Palette.textTertiary, letterSpacing: 0.2 },
   // "pausing now" i accentens blå även i det varma rummet: det är pausens
   // färg, och den ska kännas igen var den än står.
   statusTextActive: { color: Palette.accent, fontWeight: '700' },
@@ -2046,72 +2356,74 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   cardStatusActive: { color: Palette.accent },
   cardActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
 
-  addFriendBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 10, paddingVertical: 16, borderRadius: Radius.pill,
-    borderWidth: 1, borderColor: Palette.surfaceBorder, backgroundColor: Palette.surface,
-  },
-  addFriendText: { color: Palette.accent, fontSize: 15, fontWeight: '600', letterSpacing: 0.5 },
+  friendsLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  addFriendLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  addFriendLinkText: { color: Palette.hue, fontSize: 13, fontWeight: '700' },
 
 });
 
 
-const makeBubbleStyles = (Palette: AppPalette) => StyleSheet.create({
-  section: { gap: 0 },
-  sectionLabel: {
-    fontSize: 13, color: Palette.ink30, letterSpacing: 1.2,
-    marginBottom: 10, marginLeft: 4,
-    fontWeight: '400',
+const makeInboxStyles = (Palette: AppPalette) => StyleSheet.create({
+  inboxCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    padding: 16, borderRadius: Radius.lg,
+    backgroundColor: Palette.surface,
+    borderWidth: 1, borderColor: alpha(Palette.community, 0.45),
   },
-  row: {
-    flexDirection: 'row',
-    gap: 16,
-    paddingHorizontal: 2,
-    paddingVertical: 4,
+  inboxIcon: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: Palette.communityTint,
+    alignItems: 'center', justifyContent: 'center',
   },
-  wrap: {
-    alignItems: 'center',
-    gap: 6,
-    width: BUBBLE_D + 16,
+  inboxAvatar: {
+    position: 'absolute', right: -4, bottom: -4,
+    borderRadius: 13, borderWidth: 2, borderColor: Palette.surface,
   },
-  ring: {
-    width: BUBBLE_D + 8,
-    height: BUBBLE_D + 8,
-    borderRadius: (BUBBLE_D + 8) / 2,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
+  inboxTitle: { fontSize: 17, fontWeight: '800', color: Palette.textPrimary },
+  thanksCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    padding: 16, borderRadius: Radius.lg,
+    backgroundColor: alpha(Palette.dangerSoft, 0.12),
+    borderWidth: 1, borderColor: alpha(Palette.dangerSoft, 0.4),
   },
-  plusCircle: {
-    width: BUBBLE_D,
-    height: BUBBLE_D,
-    borderRadius: BUBBLE_D / 2,
-    backgroundColor: alpha(Palette.community, 0.1),
-    alignItems: 'center',
-    justifyContent: 'center',
+  thanksHeart: {
+    position: 'absolute', right: -4, bottom: -4,
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: Palette.dangerSoft,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Palette.bg,
   },
-  checkBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: Palette.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Palette.surfaceAlt,
+  thanksSub: { fontSize: 13, color: Palette.textSecondary },
+  sealedCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    padding: 16, borderRadius: Radius.lg,
+    backgroundColor: Palette.surface,
+    borderWidth: 1, borderColor: alpha(ENVELOPE.seal, 0.45),
   },
-  name: {
-    fontSize: 12,
-    color: Palette.ink55,
-    textAlign: 'center',
-    maxWidth: BUBBLE_D + 12,
+  sealedEnvelope: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: alpha(ENVELOPE.seal, 0.16),
+    alignItems: 'center', justifyContent: 'center',
   },
+  sealedSeal: {
+    position: 'absolute', right: 4, bottom: 6,
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: ENVELOPE.seal,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.8)',
+  },
+  sealedSealBar: { width: 2.5, height: 7, borderRadius: 1.25, backgroundColor: ENVELOPE.sealMark },
+  sealedBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: Palette.accent, borderRadius: Radius.pill,
+    paddingVertical: 10, paddingHorizontal: 14,
+  },
+  sealedBtnText: { color: Palette.onAccent, fontSize: 14, fontWeight: '800' },
+  inboxSub: { fontSize: 13, color: Palette.hue, fontWeight: '600' },
 });
 
 const makeStoryModalStyles = (Palette: AppPalette) => StyleSheet.create({
+  audienceText: { fontSize: 13, color: Palette.textTertiary, textAlign: 'center', marginBottom: 12 },
   container: {
     flex: 1,
     backgroundColor: Palette.bg,

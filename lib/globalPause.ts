@@ -36,7 +36,8 @@ export type GlobalPause = {
   opens_at: string;
   closes_at: string;
   server_now: string;
-  me: { intention_id: string | null; started: boolean } | null;
+  /** `finished`: pausen är slut. Så länge dörren står öppen går det att gå in igen. */
+  me: { intention_id: string | null; started: boolean; finished?: boolean } | null;
   counts: { signed_up: number; pausing: number; total_seconds: number };
   people: GlobalPausePerson[];
   /** Senaste globala pausen, en kvart efter slutet. `was_there`: man själv pausade i den. */
@@ -163,12 +164,18 @@ export async function fetchMyGlobalPauseWindows(): Promise<{ from: number; to: n
 export type GlobalPauseResult = { starts_at: string; seconds: number; people: number; total_seconds: number };
 
 // Sammanfattningen visas en gång per Global Pause: en andra paus samma
-// kvart ska bli en vanlig paus igen.
+// kvart ska bli en vanlig paus igen — utom när man gått in i rummet igen
+// (`rejoinGlobalPause`), för då är den en del av samma Global Pause.
 const summarized = new Set<string>();
 
 /** Har sammanfattningen visats för den här Global Pause? Då visar rummet nästa. */
 export function wasSummarized(startsAt: string): boolean {
   return summarized.has(startsAt);
+}
+
+/** Man går in igen efter att ha gått ut: nästa slut får sin sammanfattning. */
+export function rejoinGlobalPause(startsAt: string): void {
+  summarized.delete(startsAt);
 }
 
 /**

@@ -1,9 +1,8 @@
 import { FontAwesome } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import { setAudioModeAsync } from 'expo-audio';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,12 +11,12 @@ import { supabase } from '../lib/supabase';
 import { clearPending, getPending } from '../lib/supportQueue';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
+import { SupportHeartButton } from '../components/support-heart-button';
 
 export default function VideoScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const insets = useSafeAreaInsets();
-  const [permission, requestPermission] = useCameraPermissions();
   const [showPauseLink, setShowPauseLink] = useState(false);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [videoReady, setVideoReady] = useState(false);
@@ -26,9 +25,13 @@ export default function VideoScreen() {
   const [callerName, setCallerName] = useState<string | null>(null);
   const fadeAnim = useState(new Animated.Value(0))[0];
   const supportResponseIdRef = useRef<string | null>(null);
+  // Hjärtat behöver id:t efter att ref:en nollats vid stängning.
+  const [responseId, setResponseId] = useState<string | null>(null);
 
-  const pickupPlayer = useAudioPlayer(require('../assets/images/Pickupsound.mp3'));
-  const hangupPlayer = useAudioPlayer(require('../assets/images/HangUpSound.mp3'));
+  // Ingen upplyftningston, ingen egen kamerabild i hörnet och ingen röd lur:
+  // videosvaret såg ut som ett FaceTime-samtal (och krävde kamerabehörighet
+  // för att alls visas), vilket kändes påträngande. Nu är det en video man
+  // fått, som öppnas ur kuvertet i support-arrived.tsx.
   const videoEndedRef = useRef(false);
 
   useEffect(() => {
@@ -38,24 +41,17 @@ export default function VideoScreen() {
       // Support video response: play from URL
       if (pending?.responseType === 'video' && pending.contentUrl) {
         supportResponseIdRef.current = pending.id;
+        setResponseId(pending.id);
         setCallerName(pending.senderName);
         setVideoUri(pending.contentUrl);
         setVideoReady(true);
         clearPending();
         await setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'doNotMix', shouldRouteThroughEarpiece: false });
-        pickupPlayer.play();
         return;
       }
 
       setNoFile(true);
       setVideoReady(true);
-
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        interruptionMode: 'doNotMix',
-        shouldRouteThroughEarpiece: false,
-      });
-      pickupPlayer.play();
     };
     setup();
 
@@ -82,36 +78,23 @@ export default function VideoScreen() {
     if (!videoReady || !videoUri) return;
     videoEndedRef.current = false;
     player.play();
-    // iOS: pickup sound briefly claims the audio session (doNotMix) and interrupts the video
-    // player. When the pickup sound ends the video doesn't auto-resume, so we re-trigger play.
-    const iosResumeTimer = setTimeout(() => {
-      if (!videoEndedRef.current) player.play();
-    }, 1500);
     const subscription = player.addListener('playToEnd', () => {
       videoEndedRef.current = true;
       setShowReplay(true);
     });
     return () => {
-      clearTimeout(iosResumeTimer);
       subscription.remove();
     };
   }, [videoReady, videoUri]);
 
-  const handleHangUp = async () => {
+  const handleClose = async () => {
     if (videoUri) player.pause();
     if (supportResponseIdRef.current) {
       const ts = new Date().toISOString();
       await supabase.from('support_responses').update({ delivered_at: ts, played_at: ts }).eq('id', supportResponseIdRef.current);
       supportResponseIdRef.current = null;
     }
-    try {
-      hangupPlayer.play();
-      setTimeout(() => {
-        router.replace('/(tabs)');
-      }, 400);
-    } catch (e) {
-      router.replace('/(tabs)');
-    }
+    router.replace('/(tabs)/friends' as never);
   };
 
   const handlePauseLink = async () => {
@@ -129,19 +112,6 @@ export default function VideoScreen() {
     openPauseStart('push');
   };
 
-  if (!permission) return <View />;
-
-  if (!permission.granted) {
-    return (
-      <View style={styles.container}>
-        <Text style={{ color: 'white', marginBottom: 20 }}>The app needs access to the camera</Text>
-        <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-          <Text style={{ color: 'white' }}>Allow camera</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       {/* Video area fills remaining space above controls */}
@@ -156,12 +126,6 @@ export default function VideoScreen() {
             player={player}
             nativeControls={false}
           />
-          {/* PiP camera — bottom-right corner of the video */}
-          <View style={styles.cameraContainer}>
-            <View style={styles.cameraInner}>
-              <CameraView style={styles.camera} facing="front" />
-            </View>
-          </View>
           {showReplay && (
             <TouchableOpacity
               style={styles.replayOverlay}
@@ -182,8 +146,9 @@ export default function VideoScreen() {
         </View>
       )}
 
-      {/* Black controls area — pause button top, hang-up below, both centered */}
+      {/* Black controls area — pause button top, close below, both centered */}
       <View style={[styles.controlsArea, { paddingBottom: insets.bottom || 20 }]}>
+        <SupportHeartButton responseId={responseId} senderName={callerName ?? 'A friend'} onDark />
         {showPauseLink && (
           <Animated.View style={{ opacity: fadeAnim }}>
             <TouchableOpacity style={styles.pauseBtn} onPress={handlePauseLink} activeOpacity={0.85}>
@@ -192,8 +157,8 @@ export default function VideoScreen() {
             </TouchableOpacity>
           </Animated.View>
         )}
-        <TouchableOpacity style={styles.hangUpButton} onPress={handleHangUp}>
-          <FontAwesome name="phone" size={32} color="white" style={{ transform: [{ rotate: '135deg' }] }} />
+        <TouchableOpacity style={styles.closeBtn} onPress={handleClose} activeOpacity={0.7}>
+          <Text style={styles.closeText}>Close</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -237,24 +202,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     color: Palette.textSecondary,
     fontSize: 16,
   },
-  cameraContainer: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    width: 90,
-    height: 130,
-    borderRadius: 6,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: 'white',
-    backgroundColor: 'black',
-  },
-  cameraInner: {
-    flex: 1,
-    overflow: 'hidden',
-    borderRadius: 4,
-  },
-  camera: { flex: 1 },
   replayOverlay: {
     position: 'absolute',
     top: 0,
@@ -281,23 +228,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 3,
   },
-  hangUpButton: {
-    backgroundColor: Palette.danger,
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  permissionButton: {
-    marginTop: 20,
-    backgroundColor: Palette.accent,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: Radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  closeBtn: { paddingVertical: 10, paddingHorizontal: 20 },
+  closeText: { color: 'rgba(255,255,255,0.8)', fontSize: 15, fontWeight: '600' },
   callerOverlay: {
     position: 'absolute',
     top: 60,

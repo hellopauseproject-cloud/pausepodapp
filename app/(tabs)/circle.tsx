@@ -6,7 +6,11 @@ import {
   Pressable, ScrollView, StyleSheet, Text, TouchableOpacity,
   useWindowDimensions, View,
 } from 'react-native';
+import Reanimated, {
+  cancelAnimation, Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ConfettiRain } from '../../components/celebration-burst';
 import { CircleLevelBadge } from '../../components/circle-level-badge';
 import { CircleRewardSheet } from '../../components/circle-reward-sheet';
 import { CircleSettingsSheet } from '../../components/circle-settings-sheet';
@@ -36,6 +40,7 @@ import {
 import { applyPendingDailyGoal, getPendingCircleWelcome, setPendingCircleWelcome } from '../../lib/introPrefs';
 import { enablePushNotifications } from '../../lib/notifications';
 import { supabase } from '../../lib/supabase';
+import { PausePodLogo } from '../../components/pause-pod-logo';
 import { getCircleTodos, Todo } from '../../lib/todos';
 import type { CircleMemberProgress, CirclePeriod, CirclePotNumbers, CircleProgress } from '../../types/database';
 
@@ -114,7 +119,7 @@ function CircleSwitcher({ circles, selectedId, adding, unread, canAdd, invites, 
 }) {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
-  const onFill = Palette.mode === 'dark' ? Palette.bg : Palette.onAccent;
+  const onFill = Palette.onAccent;
   return (
     <View style={styles.switcherWrap}>
       <ScrollView
@@ -150,7 +155,7 @@ function CircleSwitcher({ circles, selectedId, adding, unread, canAdd, invites, 
             accessibilityState={{ selected: adding }}
             accessibilityLabel={invites.length > 0 ? 'Join or start another circle. Invites waiting.' : 'Join or start another circle'}
           >
-            <FontAwesome5 name="plus" size={12} color={adding ? onFill : Palette.hue} />
+            <FontAwesome5 name="plus" size={12} color={adding ? onFill : Palette.textSecondary} />
             {invites.length > 0 && !adding && <View style={styles.switcherDot} />}
           </TouchableOpacity>
         )}
@@ -176,10 +181,17 @@ function CircleSwitcher({ circles, selectedId, adding, unread, canAdd, invites, 
  * man inte röstat på belöningen. Raden inne i menyn säger var. Chatten har
  * sin egen knapp och sin egen prick och räknas inte hit.
  */
-function CircleTitle({ title, onPress, dot }: { title: string; onPress?: () => void; dot?: boolean }) {
+function CircleTitle({ title, onPress, dot, compact }: {
+  title: string;
+  onPress?: () => void;
+  dot?: boolean;
+  /** Bredvid nivåmärket: märket och chatten tar bredd ur samma rad. */
+  compact?: boolean;
+}) {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
-  if (!onPress) return <Text style={styles.title} numberOfLines={1}>{title}</Text>;
+  const titleStyle = [styles.title, compact && styles.titleCompact];
+  if (!onPress) return <Text style={titleStyle} numberOfLines={1}>{title}</Text>;
   return (
     <TouchableOpacity
       style={styles.circleTitleBtn}
@@ -188,7 +200,7 @@ function CircleTitle({ title, onPress, dot }: { title: string; onPress?: () => v
       accessibilityRole="button"
       accessibilityLabel={dot ? `${title}. Open circle menu. Something is waiting.` : `${title}. Open circle menu.`}
     >
-      <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      <Text style={titleStyle} numberOfLines={1}>{title}</Text>
       <FontAwesome5 name="chevron-down" size={14} color={Palette.hue} />
       {dot && <View style={styles.titleDot} />}
     </TouchableOpacity>
@@ -673,6 +685,48 @@ function HeroRing({
  * finns kvar i summan. Veckor innan målen började sparas (`goalsKnown`
  * false) visar timmarna med en tom ring.
  */
+/**
+ * `GOAL REACHED` under ringen: ett sken i rummets kulör som andas, och raden
+ * som sväller en aning i samma takt. Skenet är en kopia av raden med en bred
+ * textskugga, och det är dess opacitet som rör sig — `textShadowRadius` går
+ * inte att animera på UI-tråden. Med reducerad rörelse står skenet stilla.
+ */
+const GOAL_PULSE_MS = 1600;
+// Ljust, klart guld — inte palettstyrt, för `highlight` är senapsbrun i ljust
+// läge. Samma linje som regnbågen på nivåmärket: en pokal är guld mot vilken
+// botten som helst.
+const GOAL_GOLD = '#FFD84D';
+
+function GoalReachedLine() {
+  const Palette = usePalette();
+  const styles = useMemo(() => makeStyles(Palette), [Palette]);
+  const reduceMotion = useReducedMotion();
+  const t = useSharedValue(0.5);
+  useEffect(() => {
+    if (reduceMotion) { t.value = 0.5; return; }
+    t.value = 0;
+    t.value = withRepeat(withTiming(1, { duration: GOAL_PULSE_MS, easing: Easing.inOut(Easing.sin) }), -1, true);
+    return () => cancelAnimation(t);
+  }, [reduceMotion, t]);
+  const rowStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 + 0.04 * t.value }] }));
+  const glowStyle = useAnimatedStyle(() => ({ opacity: 0.35 + 0.65 * t.value }));
+
+  const line = (glow: boolean) => (
+    <>
+      <FontAwesome5 name="trophy" size={11} color={GOAL_GOLD} style={glow ? styles.goalGlowText : styles.goalBaseText} />
+      <Text style={[styles.heroStatusText, glow ? styles.goalGlowText : styles.goalBaseText]}>GOAL REACHED</Text>
+    </>
+  );
+  return (
+    <Reanimated.View style={[styles.heroStatus, rowStyle]}>
+      {line(false)}
+      <Reanimated.View pointerEvents="none" style={[styles.goalGlowLayer, glowStyle]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        {line(true)}
+      </Reanimated.View>
+    </Reanimated.View>
+  );
+}
+
 function CircleRings({
   mode, width, progress, members, byUser, meId, selectedId, onSelect, onOpenGoal, statusLine,
   replayKey, past = false, formerIds, goalsKnown = true,
@@ -765,12 +819,7 @@ function CircleRings({
           det ut som en bugg. Dagen låser aldrig upp något och visar ingen
           trofé. */}
       {!isDay && progress?.goal_reached ? (
-        <View style={styles.heroStatus}>
-          <FontAwesome5 name="trophy" size={11} color={Palette.accent} />
-          <Text style={styles.heroStatusText}>
-            GOAL REACHED · {progress.achievements_count === 1 ? 'YOUR FIRST WEEK' : `WEEK ${progress.achievements_count}`}
-          </Text>
-        </View>
+        <GoalReachedLine />
       ) : statusLine && !past ? (
         <View style={styles.heroStatus}>
           <Text style={styles.heroStatusText}>{statusLine}</Text>
@@ -1066,6 +1115,26 @@ function CircleScreen() {
   // Strecket som är valt i potten. Står kvar när perioden byts, så att man
   // tittar på samma person i veckan och i dagen. Null = en själv.
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+
+  // Konfettiregnet: en gång när man kommer in i fliken (eller byter krets)
+  // och veckans mål är nått. Laddas siffrorna efter fokus väntar regnet på
+  // dem; pollen var fjärde sekund släpper det aldrig igen förrän nästa fokus.
+  const [rainKey, setRainKey] = useState(0);
+  const rainArmedRef = useRef(true);
+  const rainInputRef = useRef<{ progress: CircleProgress | null; circleId: string | null }>({ progress: null, circleId: null });
+  rainInputRef.current = { progress, circleId: selectedCircle };
+  const tryRain = useCallback(() => {
+    const { progress: p, circleId } = rainInputRef.current;
+    if (!rainArmedRef.current || !p || p.circle_id !== circleId || !navigation.isFocused()) return;
+    rainArmedRef.current = false;
+    if (p.goal_reached) setRainKey(k => k + 1);
+  }, [navigation]);
+  useEffect(() => navigation.addListener('focus' as never, () => {
+    rainArmedRef.current = true;
+    tryRain();
+  }), [navigation, tryRain]);
+  useEffect(() => { rainArmedRef.current = true; }, [selectedCircle]);
+  useEffect(() => { tryRain(); }, [progress, selectedCircle, tryRain]);
 
   // Vänskapsläget hämtas när medlemslistan öppnas, inte i load() — den kör
   // var fjärde sekund och relationerna ändras inte i den takten.
@@ -1500,6 +1569,9 @@ function CircleScreen() {
   if (myCircles.length === 0) {
     return (
       <View style={styles.container}>
+        <View style={[styles.emptyLogo, { top: Math.max(60, insets.top + 8) }]}>
+          <PausePodLogo section="Circles" />
+        </View>
         <JoinOrCreate
           title="No circle yet"
           subtitle="Create a small circle with friends to share goals and cheer each other on."
@@ -1513,10 +1585,14 @@ function CircleScreen() {
   }
 
   const canAddCircle = myCircles.length < CIRCLE_MAX_PER_USER;
-  // I en egen View: i läggavyn står den direkt i rullningen, vars `gap`
-  // (36) annars hade hamnat mellan kapslarna och rubriken.
+  // Logotypen och kapslarna. Rubriken under dem skiljer sig: i läggavyn står
+  // den ensam, i kretsvyn bredvid nivåmärket (se `crestRow` nedan).
   const switcher = (
-    <View style={styles.header}>
+    <>
+      {/* Samma logotyp som överst på Hem och i Support. */}
+      <View style={styles.logo}>
+        <PausePodLogo section="Circles" />
+      </View>
       <CircleSwitcher
         circles={myCircles}
         selectedId={selectedCircle}
@@ -1527,19 +1603,19 @@ function CircleScreen() {
         onSelect={selectCircle}
         onAdd={() => setAdding(true)}
       />
-      <CircleTitle
-        title={adding ? 'Another circle' : (circle?.name ?? '')}
-        onPress={adding || !circle ? undefined : openMembersModal}
-        dot={!adding && !!circle && !!user && circle.settings.rewards_enabled && awaitsMyVote(reward, user.id)}
-      />
-    </View>
+    </>
   );
 
   if (adding || !circle) {
     return (
       <View style={styles.container}>
         <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(60, insets.top + 8) }]}>
-          {switcher}
+          {/* I en egen View: rullningens `gap` (36) hade annars hamnat
+              mellan kapslarna och rubriken. */}
+          <View style={styles.header}>
+            {switcher}
+            <CircleTitle title={adding ? 'Another circle' : ''} />
+          </View>
           {adding ? (
             <JoinOrCreate
               compact
@@ -1630,36 +1706,45 @@ function CircleScreen() {
     <View style={styles.container}>
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(60, insets.top + 8) }]}>
 
-        {/* Rubriken är kretsraden (se CircleTitleStrip): den valda kretsens
-            namn stort, de andra bredvid. Under den nivån till vänster och
-            chatten till höger. Belöningen och veckan stod förr bredvid
-            chatten och flyttade in i menyn bakom namnet på begäran — sidan
-            skulle vara renare. Chatten stannar: den används oftast och dess
-            prick måste synas. */}
+        {/* Under kapslarna: kretsens vapen. Nivåmärket till vänster, namnet
+            med LEVEL under sig i mitten, chatten till höger — en rad med en
+            ägare. Märket och namnet stod förr på var sin rad och läste som
+            två rubriker. Märket och LEVEL öppnar stegen, namnet menyn.
+            Belöningen och veckan stod förr bredvid chatten och flyttade in i
+            menyn bakom namnet på begäran — sidan skulle vara renare. Chatten
+            stannar: den används oftast och dess prick måste synas. */}
         <View style={styles.header}>
           {switcher}
-          <View style={styles.levelActionsRow}>
-            {/* Märket först och nivån bredvid, på samma rad. Namnet står
-                bara i stegen-modalen — raden är en ingång, inte en rubrik.
-                Chevronen efter LEVEL är borttagen på begäran; märket är
-                tryckytan och visar det själv. */}
+          <View style={styles.crestRow}>
             <TouchableOpacity
               onPress={() => setShowLadderModal(true)}
               activeOpacity={0.6}
-              style={styles.levelBadgeBtn}
               accessibilityRole="button"
               accessibilityLabel={`Level ${circleLevel}, ${circleLevelName(circleLevel)}. Open the ladder.`}
             >
-              <CircleLevelBadge level={circleLevel} size={46} />
-              <View style={styles.levelBadgeRow}>
+              <CircleLevelBadge level={circleLevel} size={48} />
+            </TouchableOpacity>
+            <View style={styles.crestText}>
+              <CircleTitle
+                compact
+                title={circle.name}
+                onPress={openMembersModal}
+                dot={circle.settings.rewards_enabled && awaitingReward}
+              />
+              <TouchableOpacity
+                onPress={() => setShowLadderModal(true)}
+                activeOpacity={0.6}
+                style={styles.crestLevelBtn}
+                hitSlop={{ top: 6, bottom: 6 }}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
                 <Text style={styles.levelBadge} numberOfLines={1}>
                   LEVEL {circleLevel}
                 </Text>
-              </View>
-            </TouchableOpacity>
-            <View style={styles.headerActions}>
-              {chatButton}
+              </TouchableOpacity>
             </View>
+            {chatButton}
           </View>
         </View>
 
@@ -2250,6 +2335,9 @@ function CircleScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Sist, så att regnet faller över allt i fliken. */}
+      <ConfettiRain rainKey={rainKey} />
     </View>
   );
 }
@@ -2262,8 +2350,11 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   scrollContent: { padding: Spacing.xl, paddingTop: 60, paddingBottom: 72, gap: 36 },
 
   header: { gap: 6 },
+  logo: { marginBottom: Spacing.lg - 6 },
+  emptyLogo: { position: 'absolute', left: Spacing.xl },
   title: { fontSize: 30, fontWeight: '900', color: Palette.textPrimary, letterSpacing: -0.3, flexShrink: 1 },
-  headerActions: { flexDirection: 'row', gap: Spacing.sm },
+  // Bredvid märket: märket och chatten tar ~120 px ur raden.
+  titleCompact: { fontSize: 24 },
   // Samma geometri och samma botten som veckoknappen i stats.tsx.
   //
   // Bottnen är `surface` och inte en tonad accent: i ljust läge lade den
@@ -2291,8 +2382,11 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     backgroundColor: Palette.accent,
     borderWidth: 2, borderColor: Palette.surface,
   },
-  levelBadgeBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, paddingVertical: 2, flexShrink: 1 },
-  levelBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
+  // Kretsens vapen: märket, namnet med LEVEL under, chatten. Namnet krymper
+  // (ellips) före märket och chatten.
+  crestRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  crestText: { flex: 1, minWidth: 0, gap: 2 },
+  crestLevelBtn: { alignSelf: 'flex-start' },
 
   // ── Kretsrubriken och väljaren ──
   circleTitleBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 10, maxWidth: '100%', paddingVertical: 2 },
@@ -2304,16 +2398,18 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   switcherPill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     height: 34, paddingHorizontal: 14, borderRadius: Radius.pill,
-    backgroundColor: Palette.hueTint, maxWidth: 200,
+    backgroundColor: Palette.ink06, maxWidth: 200,
   },
-  switcherPillOn: { backgroundColor: Palette.hue },
+  // Den valda kretsen är ifylld i accenten, inte i rummets `hue`: i hue
+  // stod väljaren i exakt samma kulör som logotypen ovanför och läste som
+  // en del av den.
+  switcherPillOn: { backgroundColor: Palette.accent },
   switcherAdd: { width: 34, paddingHorizontal: 0, justifyContent: 'center' },
-  switcherText: { fontSize: 14, fontWeight: '800', color: Palette.hue, flexShrink: 1 },
+  switcherText: { fontSize: 14, fontWeight: '800', color: Palette.textSecondary, flexShrink: 1 },
   // Olästa i en annan krets, eller en inbjudan bakom `+`. Innanför kapseln
   // och utan negativa mått: Android klipper barn utanför föräldern.
   switcherDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Palette.accent },
   switcherHint: { fontSize: 13, lineHeight: 18, color: Palette.textTertiary },
-  levelActionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.md },
 
   memberList: { maxHeight: 340, marginHorizontal: -Spacing.xs },
   memberListRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.sm },
@@ -2456,6 +2552,14 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   setGoalRow: { alignSelf: 'center', paddingVertical: 4 },
   heroStatus: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: -4 },
   heroStatusText: { fontSize: 12, fontWeight: '900', color: Palette.hue, letterSpacing: 1.3 },
+  // GOAL REACHED: ett svagt sken som alltid står där, och ett brett som andas,
+  // båda i pokalens guld (`GOAL_GOLD`) — det är en vinst, inte rummet.
+  goalBaseText: { textShadowColor: alpha(GOAL_GOLD, 0.5), textShadowRadius: 6, textShadowOffset: { width: 0, height: 0 } },
+  goalGlowText: { textShadowColor: GOAL_GOLD, textShadowRadius: 14, textShadowOffset: { width: 0, height: 0 } },
+  goalGlowLayer: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
   weekRange: { flexShrink: 1, fontSize: 12, fontWeight: '700', color: Palette.textTertiary, letterSpacing: 1.2 },
 
   // ── Panelen ───────────────────────────────────────────────────────────────

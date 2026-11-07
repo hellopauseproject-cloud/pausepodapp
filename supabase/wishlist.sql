@@ -289,6 +289,31 @@ alter table support_stories add column if not exists wishlist_item_id uuid
 alter table support_stories add column if not exists expires_at timestamptz;
 create index if not exists support_stories_item_idx on support_stories(wishlist_item_id);
 
+-- ── Vem förfrågan går till ──────────────────────────────────────────────────
+-- `recipient_ids` null = alla ens vänner (som förut); annars bara de valda.
+-- En kolumn och inte en egen tabell, för att notistriggern i
+-- social_notify.sql körs i samma ögonblick som raden skrivs: en
+-- mottagartabell hade varit tom då, och notisen hade gått till ingen.
+-- Priset är att de valda kan läsa vilka andra som fått samma fråga — de ser
+-- id:n, inga namn, och bara för en förfrågan de själva fått.
+alter table support_stories add column if not exists recipient_ids uuid[];
+
+-- Spärren är en **restriktiv** policy. Den vanliga SELECT-policyn på
+-- support_stories skapades utanför repot (den släpper igenom vänners rader),
+-- och en restriktiv policy läggs till med AND ovanpå den utan att någon
+-- behöver veta hur den ser ut. RLS är redan på för tabellen — det är den som
+-- gör att bara vänner ser varandras förfrågningar.
+drop policy if exists support_stories_audience on support_stories;
+create policy support_stories_audience on support_stories
+  as restrictive
+  for select
+  to authenticated
+  using (
+    user_id = auth.uid()
+    or recipient_ids is null
+    or auth.uid() = any(recipient_ids)
+  );
+
 -- Aktiverar en punkt som story i 24 timmar. Loggar med flit INGET i
 -- aktivitetsflödet: en story syns i story-raden, och skulle dubblerats i
 -- flödet annars.
@@ -301,11 +326,19 @@ create index if not exists support_stories_item_idx on support_stories(wishlist_
 -- punkten; skrevs det i stunden ("ask for support to study") är det INGEN
 -- punkt på någons lista och ska inte bli en heller — då bär storyn bara sin
 -- egen text i `p_activity`, och `wishlist_item_id` blir null.
+--
+-- `p_recipient_ids` null = alla vänner. En lista filtreras mot ens
+-- accepterade vänner, så ingen kan be en främling; blir den tom är det ett
+-- fel och inte "alla". Den fjärde parametern kom till efteråt, och en ny
+-- parameter skapar en överlagring i stället för att ersätta — därför droppas
+-- den gamla signaturen först.
+drop function if exists activate_story(uuid, text, text, text);
 create or replace function activate_story(
   p_item_id uuid,
   p_tone text,
   p_intention_id text default null,
-  p_activity text default null
+  p_activity text default null,
+  p_recipient_ids uuid[] default null
 )
 returns uuid
 language plpgsql
@@ -313,6 +346,7 @@ security definer
 set search_path = public
 as $$
 declare
+  v_recipients uuid[];
   v_text text;
   -- Samma 24 h som STORY_LIFETIME_MS i lib/supportStories.ts — ändras det
   -- ena måste det andra följa med.
@@ -349,11 +383,25 @@ begin
   -- En aktiv story per person. Story-raden plockar ut den egna med `.find()`
   -- på user_id, så två aktiva rader hade gjort vilken som visas godtycklig.
   -- Att publicera en ny ersätter alltså den förra.
+  if p_recipient_ids is not null then
+    select array_agg(distinct x) into v_recipients
+      from unnest(p_recipient_ids) as x
+     where exists (
+       select 1 from friendships f
+        where f.status = 'accepted'
+          and ((f.requester_id = auth.uid() and f.receiver_id = x)
+            or (f.receiver_id = auth.uid() and f.requester_id = x))
+     );
+    if v_recipients is null then
+      raise exception 'Pick at least one friend.';
+    end if;
+  end if;
+
   update support_stories set is_active = false
    where user_id = auth.uid() and is_active = true;
 
-  insert into support_stories (user_id, support_type, activity, intention_id, wishlist_item_id, expires_at)
-  values (auth.uid(), p_tone, v_text, p_intention_id, p_item_id, v_expires)
+  insert into support_stories (user_id, support_type, activity, intention_id, wishlist_item_id, expires_at, recipient_ids)
+  values (auth.uid(), p_tone, v_text, p_intention_id, p_item_id, v_expires, v_recipients)
   returning id into v_story_id;
 
   return v_story_id;

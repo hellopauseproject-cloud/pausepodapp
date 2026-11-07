@@ -1,4 +1,3 @@
-import { FontAwesome } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import {
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import DismissKeyboardView from '../components/DismissKeyboardView';
+import { PausePodLogo } from '../../components/pause-pod-logo';
 import { useAuth } from '../../contexts/AuthContext';
 import { signInWithGoogle } from '../../lib/googleAuth';
 import { AppPalette, Radius, Spacing } from '../../constants/appTheme';
@@ -78,8 +78,7 @@ export default function LoginScreen() {
       <DismissKeyboardView>
       <View style={styles.inner}>
         <View style={styles.logoRow}>
-          <FontAwesome name="pause" size={22} color={Palette.accent} />
-          <Text style={styles.logoText}>PAUSEPOD</Text>
+          <PausePodLogo color={Palette.accent} />
         </View>
 
         <View style={styles.header}>
@@ -170,12 +169,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     alignSelf: 'center',
-  },
-  logoText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: Palette.accent,
-    letterSpacing: 4,
   },
   header: {
     gap: 8,

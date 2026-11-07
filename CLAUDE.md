@@ -1,7 +1,7 @@
 # Pause Pod — protokoll och arkitektur
 
 Källan till sanning för BLE-protokollet är firmwaren:
-**[firmware/pausepod_firmware_v7/pausepod_firmware_v7.ino](firmware/pausepod_firmware_v7/pausepod_firmware_v7.ino)**
+**[firmware/pausepod_firmware_v8/pausepod_firmware_v8.ino](firmware/pausepod_firmware_v8/pausepod_firmware_v8.ino)**
 
 Detta dokument är destillerat ur den källkoden (inte ur någon separat spec) —
 vid osäkerhet, läs `.ino`-filen igen istället för att lita på det här dokumentet
@@ -143,10 +143,10 @@ finns inte; utan det använder Android appikonen. Android-behörigheterna
 `app.json` trots att biblioteket deklarerar dem själv i sitt manifest —
 explicit, så att manifestet och det här dokumentet inte kan säga olika.
 Den andra är vad som gör att ett utlagt fönster överlever en omstart.
-`VIBRATE` står kvar och ska stå kvar: [app/call.tsx](app/call.tsx) ringer med
-`Vibration.vibrate()`, och notiskanalen sätter med flit
-`vibrationPattern: null` — en påminnelse som skakar telefonen motsäger det den
-ber om.
+`VIBRATE` står kvar i `app.json` men har ingen användare längre: samtalsskärmen
+som ringde med `Vibration.vibrate()` är riven (se *Stödsvaren*). Notiskanalen
+sätter med flit `vibrationPattern: null` — en påminnelse som skakar telefonen
+motsäger det den ber om.
 
 **Vill någon ha en tredje notis är det fortfarande en ny funktion.** Den gamla
 push-halvan hade ett tak (2 vän-notiser + 1 påminnelse = 3 per dygn), en
@@ -182,10 +182,10 @@ princip att mottagare och text räknas i SQL. Edge-funktionen tar numera en
   bullrigaste källan, och det är det som är borta. Bokningen och urvalet är
   samma `update … returning`, så två meddelanden samtidigt kan inte båda
   knacka.
-- **Stödförfrågan: högst en per avsändare och dygn**, till accepterade vänner.
+- **Stödförfrågan: högst en per avsändare och dygn**, till accepterade vänner (eller bara de man valt, `recipient_ids`).
   Vänlistan har inget tak, så taket sitter i avsändaren:
   `support_request_pings (sender_id, day)`, i avsändarens lokala dygn.
-- **Stödsvaret: buntat tills öppnat.** `support_inbox_pings.notified_at`: har
+- **Stödsvaret: buntat tills öppnat.** Ett förseglat svar säger *Take a pause to open.* i stället för *Open it now.* `support_inbox_pings.notified_at`: har
   man redan knackats om ett svar som fortfarande ligger oöppnat
   (`delivered_at is null`), är nästa svar tyst. **Svaren överlever
   förfrågan:** en förfrågan står i 24 timmar (`expires_at`, båda vägarna in,
@@ -230,9 +230,10 @@ göra-lista.
   chatten medan chatten står framme** — `setChatScreenOpen` från
   [app/circle-chat.tsx](app/circle-chat.tsx). Läsmärket flyttas först när
   pollen hämtat meddelandet, så notisen kan hinna landa ovanpå det.
-- **Ett tryck:** chatten öppnar kretsens chatt (som dagsmålet), de två
-  stödnotiserna och pausinbjudan öppnar Friends. Svaret öppnas inte direkt —
-  öppningen är en del av svaret. Pausinbjudan bär pausens id
+- **Ett tryck:** chatten öppnar kretsens chatt (som dagsmålet),
+  stödförfrågan och pausinbjudan öppnar Friends, och stödsvaret öppnar kuvertet
+  (`app/support-arrived.tsx`) — innehållet visas först när man öppnat det,
+  för öppningen är en del av svaret. Pausinbjudan bär pausens id
   (`data.shared_id`), så att Friends kan säga *Anna's pause has ended.* när
   dörren hunnit stängas i stället för att bara inte visa något kort.
 - **Behörigheten frågas** (`enablePushNotifications`, tidigare
@@ -249,7 +250,7 @@ en väntskärm (`app/pause-invite-waiting.tsx`, raderad) tills vännen svarade:
 appen bad en stirra på telefonen, ett nej blev en skärm att läsa, och en
 inbjudan som aldrig besvarades hade inget slut.
 
-- **Raden för Global Pause är en kapsel i designsystemets ribbon**, i flikarnas ljusa toner (`#8CC4FF → #7FE0B0 → #FFB77D`), lite genomskinlig med en mjuk glans upptill och ingen kant. Ett mörkblått jordklot är namnet i alla lägen, och texten är mörk navy: *Next · 18:00*, *Tomorrow · 18:00*, *In 1h 20min*, *12 pausing now*, och *Done* en kvart efter slutet, sedan nästa. En prick andas vid jordklotet medan den pågår. En ribbon som bara kant, och dessförinnan honung, prövades och föll. Honung prövades och föll på begäran: den lästes som en varning. Den står överst på Hem, under topbaren och utanför blocket. `BLOCK_LIFT` håller blocket högre, så att PAUSE inte hamnar för långt ner. Raden har luft mot topbaren (`marginTop`), och lyftet är höjt i samma andetag så att blocket under inte flyttade ner.
+- **Raden för Global Pause är en kapsel i designsystemets ribbon**, i flikarnas ljusa toner (`#8CC4FF → #7FE0B0 → #FFB77D`), lite genomskinlig med en mjuk glans upptill och ingen kant. Ett mörkblått jordklot är namnet i alla lägen, och texten är mörk navy: *Next · 18:00*, *Tomorrow · 18:00*, *In 1h 20min*, *12 pausing now* (*Join Global Pause* när ingen pausar än och dörren är öppen, aldrig *0 pausing now*), och *Done* en kvart efter slutet, sedan nästa. En prick andas vid jordklotet medan den pågår. En ribbon som bara kant, och dessförinnan honung, prövades och föll. Honung prövades och föll på begäran: den lästes som en varning. Den står överst på Hem, under topbaren och utanför blocket. `BLOCK_LIFT` håller blocket högre, så att PAUSE inte hamnar för långt ner. Raden har luft mot topbaren (`marginTop`), och lyftet är höjt i samma andetag så att blocket under inte flyttade ner.
 - **PAUSE står i ett eget sken** ([components/pause-ambience.tsx](components/pause-ambience.tsx)), på Hem och i Global Pause-rummet: en bred ljusblå och en tät accentblå radiell glöd bakom knappen som andas på 6 s.
 - **Global Pause-raden är grå tills den pågår.** Då tänds ribbon, glansen och en ljusreflex som sveper över den, och pricken vid jordklotet skiftar genom ribbonens tre färger. Raden svävar mitt emellan topbaren och Day/Night (`bannerTop`), medan platsen den tar i flödet står kvar så att blocket inte flyttar sig.
 - **PAUSE är ett material, inte en platt färg** ([components/pause-button-face.tsx](components/pause-button-face.tsx)): en toning ljus upptill och djup nedtill, designsystemets ljusa pausblå som ett ljus inifrån uppe i mitten, och en hårfin ljuskant som är starkast upptill (Liquid Glass spekulära kant, Linears inre ljuslinje). Den ligger under hållfyllningen (`background`). En platt ljus övre halva prövades först och föll: två färger är inte ett material. Inbjudan bor i knappen bredvid PAUSE.
@@ -292,7 +293,7 @@ En gång om dagen pausar alla samtidigt. Schema och regler i
 [components/global-pause-line.tsx](components/global-pause-line.tsx). Svaret på
 "ingen använder appen": något att göra samtidigt som andra.
 
-- **Rummet är en enda sak: en mjuk gloria.** Två versioner föll: siffror med en lista var platt, och en himmel med en prick per person var rörig. Nu står tiden eller antalet i en gloria, under den ansikten och en rad som byter person (*Anna is reading*). Sidan rullar inte. Alla finns bakom ansiktena, i ett ark med ett rutnät: `PEOPLE_SHOWN` visas först, och *20 more* / *+100 more* (avrundat nedåt) visar resten. *I'll join* är ett tryck och ser därför inte ut som PAUSE, som hålls in: en ram och ingen fyllning. Den anmäler direkt, och intentionen väljs i ett ark i stunden pausen startas. Bakom glorian roterar ett jordklot av linjer i ribbon-färgerna ([components/globe-grid.tsx](components/globe-grid.tsx)), ett varv på 90 s och tonat mot kanten; det står still med reducerad rörelse. PAUSE är samma knapp och storlek som på Hem och står i ungefär samma höjd (`ACTIONS_BOTTOM`). Efter *I'll join* går det inte att gå ur: *Leave* togs bort på begäran. När den är slut står *You were there.* för den som pausade i den (`last.was_there`). Siffran i glorian är display, Arial Black 900 och tät. Raden och ansiktena ligger absolut över glorians nederkant, så att klotet står på samma plats i alla lägen. Rummet hör till `night`. **Inga statusord:** *on hold* och *done* står inte om någon person; klockan står bara still.
+- **Rummet är en enda sak: en mjuk gloria.** Två versioner föll: siffror med en lista var platt, och en himmel med en prick per person var rörig. Nu står tiden eller antalet i en gloria, under den ansikten och en rad som byter person (*Anna is reading*). Sidan rullar inte. Alla finns bakom ansiktena, i ett ark med ett rutnät: `PEOPLE_SHOWN` visas först, och *20 more* / *+100 more* (avrundat nedåt) visar resten. *I'll join* är ett tryck och ser därför inte ut som PAUSE, som hålls in: en ram och ingen fyllning. Den anmäler direkt, och intentionen väljs i ett ark i stunden pausen startas. Bakom glorian roterar ett jordklot av linjer i ribbon-färgerna ([components/globe-grid.tsx](components/globe-grid.tsx)), ett varv på 90 s och tonat mot kanten; det står still med reducerad rörelse. Rummets klot har inget märke i mitten; det prövades och togs bort på begäran. Statistikens lilla klot och veckans kort har pausens två streck i mörkblått med en ljus glöd bakom (`mark` på `GlobeGrid`), och på veckans kort andas det. PAUSE är samma knapp och storlek som på Hem och står i ungefär samma höjd (`ACTIONS_BOTTOM`). Efter *I'll join* går det inte att gå ur: *Leave* togs bort på begäran. När den är slut står *You were there.* för den som pausade i den (`last.was_there`). Siffran i glorian är display, Arial Black 900 och tät. Raden och ansiktena ligger absolut över glorians nederkant, så att klotet står på samma plats i alla lägen. Rummet hör till `night`. **Inga statusord:** *on hold* och *done* står inte om någon person; klockan står bara still.
 - **Den heter *Global Pause*** (`GLOBAL_PAUSE_NAME` i lib/notifications.ts). *Pause Hour*, *Phones Down* och några till prövades eller föreslogs och valdes bort: namnet ska säga rakt ut att det är en paus för alla.
 - **Ett enda ögonblick för hela världen**, visat i lokal tid. Ingen väljer
   tidszon: det hade delat rummet. Schemat är en rad per veckodag i
@@ -301,7 +302,10 @@ En gång om dagen pausar alla samtidigt. Schema och regler i
   en timme var. Tiderna ska ses över om appen får användare långt bort.
 - **Dörren står öppen 10 minuter före till 30 minuter efter starten.** Den
   egna pausen går hur länge som helst. Den globala blir DONE vid sitt slut och
-  rör aldrig pausen; rummet säger DONE i en kvart (`last`).
+  rör aldrig pausen; rummet säger DONE i en kvart (`last`). **Den som gått ut
+  får gå in igen** så länge dörren står öppen: PAUSE står i rummet igen
+  (`me.finished`), `report_global_pause` öppnar raden på nytt och tiden läggs
+  till, och sammanfattningen visas en gång till (`rejoinGlobalPause`).
 - **Man anmäler sig, och sedan räknas man.** En lådpaus har ingen intention, eftersom den väljs när pausen startas i appen, så den står som *is pausing*. Bara den med en rad
   i `global_pause_joins` syns; en vanlig paus rapporterar också, men utan rad
   är det en no-op i SQL. Påbörjad före dörren öppnats räknas pausen inte, för
@@ -312,7 +316,10 @@ En gång om dagen pausar alla samtidigt. Schema och regler i
   ligger efter tills nästa rapport kommer, av samma skäl som hjärtslag inte går
   (se *Pausa tillsammans*).
 - **Lådpauser räknas när de sparas**, av triggern på `pause_sessions`, alltså
-  inte live. Live kräver att lådan skickar start och frysning över WiFi.
+  inte live — båda sorterna: appens via outboxen och NFC-pausen som lådan
+  själv laddar upp (`box-session`, se *NFC-pausens väg till databasen*).
+  Anmäld + telefonen i lådan inom dörren räcker; ingenting görs i appen.
+  Live kräver att lådan skickar start och frysning över WiFi.
 - **Alla i rummet syns med användarnamn**, på begäran: *Someone* var opersonligt, och att anmäla sig är att kliva in i rummet. `global_pause_joins` har inga grants och `get_global_pause` lämnar aldrig ut ett `user_id`. Vänner och kretskamrater står först, i rummens kulörer. En egen intention är fritext och visas som *is pausing* för alla andra.
 - **Inga bottar, och siffrorna är alltid de riktiga.**
 - **Påminnelsen är lokal**, 10 minuter före, och läggs ut av *I'll join*. Den
@@ -326,7 +333,7 @@ En gång om dagen pausar alla samtidigt. Schema och regler i
   tillbaka. Utfallet loggas som `global_pause_reminder` (`scheduled`,
   `no_permission`, `too_late`, `error`). Android-kanalen sätts på **triggern**,
   inte i `content` — den här versionen av expo-notifications läser den bara där.
-- **Efter en paus i en Global Pause** visar sammanfattningen ([components/global-pause-summary.tsx](components/global-pause-summary.tsx)) jordklotet, pausens tid, hur många man pausade med och tiden tillsammans, och under det nästa Global Pause med *I'll join* (ett tryck byter knappen mot *You're in*, tiden står kvar), i nattrummet, och stannar tills *Back to start*. Har man sett den visar rummet nästa i stället för DONE (`wasSummarized`). Statistiksidan har rubriken *YOUR PAUSES* och Friends *FRIENDS*, samma display (26 pt, 900). På pausens kort står jordklotet nere i högra hörnet, centrerat under lådan. Veckans sammanfattning (my-wrapped) har ett ribbonkort med antalet Global Pauses de senaste sju dagarna ([components/global-pause-week-card.tsx](components/global-pause-week-card.tsx)), bara när det är minst en. `get_my_last_global_result()` avgör, inom tio minuter efter att ens rad slutat (eller medan den ännu går, eftersom `finished` kan komma efter), och den visas en gång per Global Pause. En vanlig ensam paus byter som förut direkt till Hem.
+- **Efter en paus i en Global Pause** visar sammanfattningen ([components/global-pause-summary.tsx](components/global-pause-summary.tsx)) jordklotet, pausens tid, hur många man pausade med och tiden tillsammans (ingetdera om man var ensam — *You held the room.* stod där och var kryptisk), och under det nästa Global Pause med *I'll join* (ett tryck byter knappen mot *You're in*, tiden står kvar), i nattrummet, och stannar tills *Back to start*. Har man sett den visar rummet nästa i stället för DONE (`wasSummarized`). Statistiksidan och Support-fliken har ingen sidrubrik (*YOUR PAUSES* och *SUPPORT* togs bort på begäran). På pausens kort står jordklotet nere i högra hörnet, centrerat under lådan. Veckans sammanfattning (my-wrapped) har ett ribbonkort med antalet Global Pauses de senaste sju dagarna ([components/global-pause-week-card.tsx](components/global-pause-week-card.tsx)), bara när det är minst en. `get_my_last_global_result()` avgör, inom tio minuter efter att ens rad slutat (eller medan den ännu går, eftersom `finished` kan komma efter), och den visas en gång per Global Pause. En vanlig ensam paus byter som förut direkt till Hem.
 - **I statistiken** står samma jordklot under lådan på en paus som låg i en Global Pause. Kortet matchar på tid mot `get_my_global_pauses()` (en minuts marginal), utan någon kolumn på `pause_sessions`.
 - **Inget här får stoppa en paus.** `reportGlobalPause` väntas aldrig in, och
   triggern har `exception when others`.
@@ -589,8 +596,9 @@ Tidigare revs tre steg, och vart och ett hade redan en bättre hemvist:
 
 **Lådsteget är borta så länge lådan inte går att välja, och inte längre.**
 Lådan är den enda delen av produkten som inte finns i telefonen, och den som
-inte vet att den existerar hittar aldrig dit av sig själv — och tummarnas
-grind står ingen annanstans innan telefonen ligger i en stängd låda.
+inte vet att den existerar hittar aldrig dit av sig själv. (Skälet var förr
+också tummarnas grind, som ingen annanstans förklarades; tummarna är borta i
+v8, och lådsteget ska skrivas om efter taggen när det kommer tillbaka.)
 
 Wrapped introduceras ingenstans, och ska inte göra det: den sammanfattar en
 historik som en ny användare per definition inte har. Samma logik som
@@ -675,9 +683,9 @@ taggarna nedan). Valskärmen står kvar i koden.
   (samma rutt, parametrar och händelse, plus `skipped_setup: true`). Den
   grenen rördes inte, för app/pause.tsx ändras bara i gest och utseende —
   ändras den ena måste den andra följa med.
-- **Lådans väg går inte att nå utan valskärmen**, och det är avsiktligt:
-  `set_mode` skickas därifrån, och lådan startar aldrig en paus på egen hand
-  (se ovan). Det är firmware-arbete, inte en flagga.
+- **Appens lådväg går inte att nå utan valskärmen**, och det är avsiktligt:
+  `set_mode` skickas därifrån. Lådans egen väg (NFC-taggen, v8) behöver
+  ingen app alls — se protokolldelen.
 - **Finish på pausskärmen hålls också in** ([app/pausing.tsx](app/pausing.tsx),
   båda knapparna — den under klockan och den i *PUT PHONE FACE DOWN*), och den
   är **röd** (`Palette.danger`), inte accent: att avsluta ska inte se ut som
@@ -782,6 +790,25 @@ skriver. Tre saker att veta:
   kategorins id, inte dess plats i listan, så att den inte byter färg när
   någon ändrar sina val. En otaggad paus står i rummets blå med pausens
   symbol. Chippen under kortet är också färgade (`colorful`).
+- **Diagrammet i statistiken är blått, och intentionerna står under det**
+  ([components/pause-activity-chart.tsx](components/pause-activity-chart.tsx)):
+  upp till fem rader med emoji, namn, ett tunt streck i accenten och talet,
+  för perioden eller den valda stapeln. Otaggat står inte med. Staplar
+  staplade i intentionernas toner prövades (också i pastell) och föll på
+  begäran: för stökigt. Hems ring färgas inte heller — den svarar på *hur
+  långt idag* och ska vara lugn bredvid PAUSE.
+- **Statistikens hjärta är all tid någonsin** ([components/pause-total-heart.tsx](components/pause-total-heart.tsx)):
+  *TOTAL TIME* och ett stort tal fritt på sidan, alltid timmar och minuter
+  (`10h 32 min`), som tonar från en ljusare accent upptill via `#217bd4` till
+  djup marin nedtill, med en mjuk skugga rakt ner för djup. Toningen är band
+  om 1,5 pt av samma RN-text, var och en klippt till sin remsa (`FADE`,
+  `BAND_PT`); 14 tjockare band gav synliga trappsteg. Det tonar fram och glider upp (1,6 s, en mjuk
+  haptik) — känslan ska vara *mmm*, inte *ta-da*. Talet rörs inte av
+  diagrammets bläddring, och bara pauser räknas. **Vanlig RN-text, inte
+  svg:** svg-text med toning prövades två gånger och klippte slutet (`10h 0`)
+  respektive centrerade fel. Det som föll på begäran: en ring mot milstolpar,
+  ett räkneverk, svart text, en ljus toning, ett mörkt nattkort med klot och
+  ljusreflex, och en glans i talet.
 - **En lådpaus (`with_pod`) är ett vanligt kort med lådan i hörnet**
   ([components/pod-box-icon.tsx](components/pod-box-icon.tsx)): en liten
   ritad låda i ljus ek med displayens två blå streck, överst i kortets högra
@@ -804,95 +831,129 @@ skriver. Tre saker att veta:
 - Inga att göra-punkter som taggar än: de hade kunnat bli ens "top intention"
   i wrapped, som vänner ser. Det kräver en ändring i wrapped först.
 
-**Lådan startar aldrig en paus på egen hand.** Utan ett `set_mode` från appen
-händer ingenting när locket stängs — lådan har ingen sensor för om det ligger
-en telefon i den, så ett stängt lock på en tom låda loggade annars en riktig
-paus. `AWAITING_LID` (enda vägen in till `CHECKING_IN`) nås bara via
-`set_mode`/`phone_down`.
+**En paus startas på två sätt, och varje paus går bara en väg.** v8 har
+NFC och WiFi, och tumplattorna är borta.
+
+- **Lådans egen paus (NFC).** Telefonen bär en registrerad Pause-tagg. Läggs
+  den i lådan slår lådan upp taggen (`box-tag`), visar **HI, <NAMN>**, och
+  när locket stängs startar pausen — ingen app, ingen Bluetooth. Okänd tagg
+  ger en QR-kod för registrering (`claim-tag`, [lib/tagPairing.ts](lib/tagPairing.ts),
+  [supabase/tag_pairing.sql](supabase/tag_pairing.sql)). Lådan sparar pausen
+  själv över WiFi, också när appen är stängd. **Appen får inget om den över
+  Bluetooth**: `state` säger `idle` och lockhändelserna skickas inte medan en
+  NFC-paus pågår (`phaseName()`, `tellApp` i `handleLid()`), annars hade
+  appen hoppat in i sin pausskärm för en paus den inte ska spara.
+- **Appens paus (Bluetooth)**, som i v7: `set_mode` → `phone_down` → locket.
+  Den går till appen som `session_ended` och sparas av
+  [lib/sessionOutbox.ts](lib/sessionOutbox.ts). En sådan paus skickas aldrig
+  över WiFi, och en NFC-paus aldrig över Bluetooth — annars sparades den två
+  gånger.
+
+**Ett stängt lock på en tom låda startar fortfarande ingenting.** Det som i
+v7 var tummarnas grind är nu taggen: utan en känd tagg i lådan (eller ett
+`set_mode`/`phone_down` från appen) händer ingenting när locket stängs. Bara
+en *stängning* räknas — ett lock som redan var stängt vid start startar
+ingen paus, så en omstart med telefonen i lådan loggar inget.
+
+### NFC-pausens väg till databasen
+
+Edge-funktionen `box-session` tar emot `{tag_uid, seq, duration_ms,
+completed, ended_ago_ms}` med `x-box-id`/`x-box-key` (samma som `box-tag`)
+och anropar `record_box_session()`. Den skriver en vanlig rad i
+`pause_sessions` (`with_pod = true`, `source = 'nfc'`, `kind = 'pause'`,
+`intention` null, dedupe på `box_seq = '<box>:<seq>'`), och för en avslutad
+paus `record_circle_pause` och `record_daily_goal_reached` med Stockholms
+tidszon. Raden når alltså kretsen, dagsmålet och **Global Pause** (triggern
+`count_box_pause_in_global`) utan att appen är inblandad.
+
+- **Varken `box-session` eller `record_box_session()` ligger i repot** — de
+  är deployade (`box_sessions_nfc.sql` nämns i funktionen men saknas). De
+  borde hämtas in, samma konvention som resten av `supabase/`.
+- **Sluttiden är okänd efter en omstart.** Lådan har ingen klocka, så
+  `ended_ago_ms` räknas ur `millis()`. Ligger pausen kvar i WiFi-kön över en
+  omstart eller djupsömn — eller återställs den ur en checkpoint — skickas
+  `0`, och pausen sparas som om den slutade när den laddades upp. Den kan då
+  hamna på fel dag och missa (eller träffa) ett Global Pause-fönster.
+- **Ingen intention, ingen "pausing now", ingen sammanfattning.** Appen vet
+  inte att pausen pågår; den syns först i statistiken när den laddats upp.
 
 BLE: Service UUID `12345678-1234-1234-1234-123456789012`,
 Characteristic UUID `abcdefab-cdef-abcd-efab-cdefabcdefab` (notify + write).
 
-## Ritualen (v7)
+## Ritualen (v8)
 
-1. Användaren väljer paus i appen → `set_mode:<läge>:<UP|DOWN>:<sekunder>`
-   (lådan parsar inte innehållet — bara att något kom räknas. Den sätter
-   `phonePlaced = false` och går till `AWAITING_LID`, visar **PLACE PHONE IN **)
-2. Telefonen läggs ner → appen skickar `phone_down` → lådan visar **CLOSE BOX**.
-   Reses telefonen upp igen skickar appen `phone_up` och båda går tillbaka till
-   **PLACE PHONE IN BOX** — steget kan upprepas fritt, och lådans nedräkning
-   börjar om vid varje vändning.
-3. Locket stängs → lådan skickar `lid_closed`. Bara om fasen är
-   `AWAITING_LID` (dvs appen har bett om en paus) går den till `CHECKING_IN`
-   och visar en tom ring med **HOLD TO START** — annars skickas `lid_closed`
-   men ingenting mer händer. Öppnas locket igen innan tummarna hållits
-   färdigt går lådan tillbaka till steg 2 (**CLOSE BOX**), inte till loggan —
-   steget kan alltså upprepas hur många gånger som helst.
-4. Båda tummarna hålls 0,9 s (`CHECKIN_FILL_MS`) → lådan skickar
-   `checkin_complete` **och** `session_started:<seq>` i samma andetag,
-   startar klockan, och spelar en startceremoni (bock → PAUSE STARTED →
-   1-2-3-4-5 → logga tonas in, ~8,4 s totalt). Klockan går redan under
-   ceremonin.
-   - **Incheckningen är en grind, inte bara ceremoni:** en paus börjar
-     aldrig av sig själv. Checkar ingen in inom `CHECKIN_TIMEOUT_MS` (30 s)
-     faller lådan tillbaka till `IDLE` utan att någon paus räknats — nytt
-     försök kräver att locket öppnas och stängs igen. Skälet är att lådan
-     inte kan veta om det ligger en telefon i den: ett stängt lock på en tom
-     låda loggade annars en riktig paus. Appens reducer ska ändå aldrig
-     villkora på att `checkin_complete` och `session_started` kommer i en
-     viss ordning — de skickas i samma andetag och båda kan tappas var för
-     sig.
-5. Pausen löper. Tummarna gör inget längre under en aktiv paus förutom att
-   toggla vilken info som visas (`ACTIVE` ↔ `SHOWING_TIME`) — ingen
-   utcheckningsgest finns kvar.
-6. Locket öppnas → `lid_opened`, lådan fryser klockan, visar **ON HOLD** med
-   en krympande ring, 30 s frist (`RESPITE_MS`). Stängs locket igen innan
-   fristen går ut fortsätter pausen (`ACTIVE`) där den var.
-7. Telefonen lyfts → appen skickar `phone_up` → lådan avslutar pausen
-   (`completed = 1`) **men bara om fasen är `RESPITE`** (dvs bara om locket
-   redan är öppet). Går fristen ut utan `phone_up`: `completed = 0`.
-   Appen bör alltså bara skicka `phone_up` medan den vet att en session
-   pågår (efter `session_started`, före `session_ended`) — se
-   [app/_layout.tsx](app/_layout.tsx)s globala lyft-detektering.
+**NFC-pausen:**
+
+1. Telefonen läggs i lådan → taggen läses (`TAG_POLL_MS` 150) → uppslag
+   mot `box-tag` → **HI, <NAMN>**.
+2. Locket stängs → pausen startar: bock → **CLOCK ON.** → 00:01–00:05 →
+   märket (`CER_END`, ~8,4 s). Klockan går redan under ceremonin. Stängs
+   locket medan uppslaget är på väg startar pausen när svaret kommer
+   (`startWhenKnown`).
+3. Locket öppnas → klockan fryser, **ON HOLD**, 30 s frist (`RESPITE_MS`).
+   Stängs locket igen med taggen kvar fortsätter pausen.
+4. Taggen borta i `TAG_GONE_MS` (1,5 s) med locket öppet = telefonen lyft
+   → klar, `completed = 1`. Stängs locket över en tom låda: också klar.
+   Går fristen ut: `completed = 0`.
+
+**Appens paus:**
+
+1. `set_mode:<läge>:<UP|DOWN>:<sekunder>` (innehållet parsas inte) →
+   `AWAITING_LID`, `phonePlaced = false`, **PLACE PHONE IN BOX**.
+2. `phone_down` → **CLOSE BOX**. `phone_up` tar tillbaka till **PLACE
+   PHONE IN BOX**, och steget kan upprepas. Är appen tyst i
+   `PHONE_WAIT_MAX_MS` (20 s), eller kopplas den ner, visar lådan **CLOSE
+   BOX** ändå.
+3. Locket stängs → `lid_closed`, och **i samma stund** `checkin_complete`
+   och `session_started:<seq>`. Ingen incheckning: locket *är* den. Appens
+   reducer ska ändå aldrig villkora på ordningen mellan de två.
+4. Locket öppnas → `lid_opened`, **ON HOLD**, 30 s frist. Stängs det igen
+   fortsätter pausen.
+5. `phone_up` under `RESPITE` → klar, `completed = 1`. Går fristen ut:
+   `completed = 0`. Appen skickar `phone_up` bara medan den vet att en
+   session pågår — se [app/_layout.tsx](app/_layout.tsx)s lyft-detektering.
 
 ## Protokoll — Lådan → Appen (notify)
 
+Gäller bara appens pauser. Under en NFC-paus säger lådan `idle` och inget mer.
+
 | Meddelande | Betydelse |
 |---|---|
-| `hello:<box_id>` | Skickas direkt vid anslutning |
-| `state:<fas>:<elapsedMs>:<seq>` | Nuläge. Fas: `idle`, `checking_in`, `checked_in`, `awaiting_lid`, `active`, `respite` (`stats`/`ended` mappas till `idle`, `showing_time`/`checkout_arming`/`checkout_confirm` till `active` — se `phaseName()`) |
+| `hello:<box_id>` | Vid anslutning. `box_id` är chip-id:t, inte WiFi-identiteten `BOX_ID`. |
+| `state:<fas>:<elapsedMs>:<seq>` | Nuläge. Fas: `idle`, `checked_in`, `awaiting_lid`, `active`, `respite` (allt annat → `idle`, `showing_time` → `active`; en NFC-paus → `idle:0:0`). `checking_in` finns inte längre. |
 | `battery:<0-100>` | Vid anslutning, sedan var 5:e minut |
-| `touch_begin:<left\|right>` / `touch_end:<left\|right>` | Tumplattorna. Appen loggar, renderar inget. |
-| `checkin_complete` | Tummarna höll färdigt 0,9 s |
-| `session_started:<seq>` | Klockan går. Kan komma utan föregående `checkin_complete` (se ceremoni-fallback ovan). |
-| `lid_closed` / `lid_opened` | Hall-sensorn |
-| `session_ended:<seq>:<durationMs>:<completed>:<ageMs>` | Färdig session. `completed=1` vid lyft under `RESPITE`, `0` vid utgången frist eller för kort session. `ageMs` är hur länge sedan den slutade — `0` för färska. **Undantag:** en session återställd från en krasch (`recoverCheckpoint()`) rapporterar alltid `ageMs=0` oavsett hur länge den faktiskt legat i kön, eftersom lådan inte sparar en verklig sluttid för den — en firmware-begränsning, inte ett appfel. |
+| `checkin_complete` | Locket stängdes under `AWAITING_LID` (förr: tummarna höll färdigt) |
+| `session_started:<seq>` | Klockan går, samma stund som `checkin_complete` |
+| `lid_closed` / `lid_opened` | Hall-sensorn — bara under appens paus eller `AWAITING_LID` |
+| `session_ended:<seq>:<durationMs>:<completed>:<ageMs>` | Färdig session. `ageMs` är `0` för färska och för återställda ur en checkpoint (lådan vet inte deras sluttid). |
+
+`touch_begin`/`touch_end` skickas inte längre.
 
 ## Protokoll — Appen → Lådan (write)
 
 | Meddelande | Skickas när |
 |---|---|
-| `set_mode:<läge>:<UP\|DOWN>:<sekunder>` | Paus vald i appen. Innehållet parsas inte av lådan idag — bara att meddelandet kommer räknas. Skicka `set_mode:session:UP:0` tills en längdväljare finns. |
-| `phone_down` | Telefonen ligger platt (appens accelerometer). Rapport om läget, inte en order — lådan agerar på den under `AWAITING_LID` (sätter `phonePlaced`, visar **CLOSE BOX**) och ignorerar den i övriga faser. |
-| `phone_up` | Telefonen är inte längre nedlagd. Samma sorts rapport, och fasen avgör innebörden: under `RESPITE` avslutas pausen (`completed = 1`), under `AWAITING_LID` nollas `phonePlaced` och displayen går tillbaka till **PLACE PHONE IN BOX**. I övriga faser händer ingenting. Skicka den bara när appen vet vilket av de två lägena den är i — `_layout.tsx` för det första (medan en session pågår), `placeinbox.tsx` för det andra (medan reducern står i `awaiting_lid`). |
+| `set_mode:<läge>:<UP\|DOWN>:<sekunder>` | Paus vald i appen. Innehållet parsas inte. Skicka `set_mode:session:UP:0`. Gäller bara från `IDLE`. |
+| `phone_down` | Telefonen ligger platt. Under `AWAITING_LID` sätter den `phonePlaced` (**CLOSE BOX**). **I `IDLE` gör den samma sak — den startar alltså ett försök utan `set_mode`.** |
+| `phone_up` | Under `RESPITE` i appens paus: klar (`completed = 1`). Under `AWAITING_LID`: tillbaka till **PLACE PHONE IN BOX**. En NFC-paus rörs aldrig av den. |
 | `session_ack:<seq>` | Varje gång ett `session_ended` tagits emot och sparats lokalt |
 
-`time_sync:` tas emot av lådan men ignoreras medvetet — skicka det inte.
+Allt annat (också `time_sync:`) ignoreras.
 
 ## Fyra krav som tappar data om de missas
+
+Gäller appens pauser; NFC-pauserna har sin egen kö och dedupe på servern.
 
 1. **`device.requestMTU(185)`** direkt efter connect, före
    `monitorCharacteristicForService`. Standard-MTU ger 20 byte nyttolast;
    `session_ended:12:1847000:1:0` är längre. iOS förhandlar upp automatiskt,
    Android gör det inte — meddelanden kapas tyst annars.
 2. **Acka alltid**, efter att sessionen skrivits till lokal lagring — inte
-   före. Lådans kö (`queueBuf`, max 50, `sendNextBacklog()` skickar om var
-   3:e sekund utan ack) töms bara av `session_ack:<seq>`.
-3. **Deduplicera på `seq`** — unik och stigande per låda. Lådan skickar om
-   efter `ACK_TIMEOUT_MS` (3 s) utan ack, så samma session kan komma flera
-   gånger.
-4. **Sluttid = `Date.now() - ageMs`**, inte mottagningstiden. Köade/omskickade
-   sessioner har `ageMs > 0`.
+   före. Lådans kö (`queueBuf`, max 50, skickas om efter 3 s utan ack) töms
+   bara av `session_ack:<seq>`.
+3. **Deduplicera på `seq`** — unik och stigande per låda, och delad med
+   NFC-pauserna (samma `nextSeq`), så det blir luckor i appens följd.
+4. **Sluttid = `Date.now() - ageMs`**, inte mottagningstiden.
 
 Status i appen: alla fyra är implementerade. Se
 [context/BLEContext.tsx](context/BLEContext.tsx) (MTU),
@@ -902,40 +963,18 @@ Status i appen: alla fyra är implementerade. Se
 
 ## Kända firmware-begränsningar (kan inte fixas i appen, bara hanteras)
 
-- **Tysta timeouts vid `AWAITING_LID` och `CHECKING_IN`:** stänger ingen
-  locket inom `AWAIT_LID_MAX_MS` (90 s), eller checkar ingen in inom
-  `CHECKIN_TIMEOUT_MS` (30 s) efter `lid_closed`, går lådan tillbaka till
-  `idle` **utan att skicka något meddelande**. Appen kan alltså inte få veta
-  det av lådan och stod förr kvar på **CLOSE THE LID** i all evighet.
-  [app/placeinbox.tsx](app/placeinbox.tsx) speglar numera båda gränserna med
-  egna klient-timers (`ABANDON_*`-konstanterna) och landar i sin
-  `abandoned`-vy när de går ut. Marginalen `GRACE_MS` ligger alltid **efter**
-  lådans gräns — lådan ska falla först, annars kan appen hinna lämna skärmen
-  precis medan pausen faktiskt startar. Nytt försök kräver ändå att locket
-  öppnas och stängs igen. Det här är numera den **enda** vägen till
-  `abandoned`: ett öppnat lock tar försöket tillbaka till **CLOSE BOX** i
-  stället för att avsluta det (se nästa punkt).
-- **`lid_opened` under `CHECKING_IN` dödar inte längre försöket:** öppnar man
-  locket för att titta på displayen innan tummarna hållits går lådan tillbaka
-  till `AWAITING_LID` och visar **CLOSE BOX** igen (den satte förr `idle`, och
-  appen svarade med sin `abandoned`-vy — att titta i lådan är inte samma sak
-  som att ångra sig). `phonePlaced` sätts `true` på vägen tillbaka: locket har
-  varit stängt, alltså ligger telefonen i lådan. Reducerns `LID_OPENED` speglar
-  det med `checking_in` → `awaiting_lid`, så `placeinbox.tsx` står kvar på
-  **CLOSE THE LID**. Locket kan därmed stängas flera gånger under ett och
-  samma försök — båda sidors nedräkningar (`AWAIT_LID_MAX_MS` respektive
-  `CHECKIN_TIMEOUT_MS`) startar om vid varje växling, och det är fortfarande
-  bara de tysta timeouterna som avslutar försöket.
+- **Tyst timeout vid `AWAITING_LID`:** stänger ingen locket inom
+  `AWAIT_LID_MAX_MS` (90 s, räknat från att **CLOSE BOX** visades) går lådan
+  till `idle` utan att skicka något. [app/placeinbox.tsx](app/placeinbox.tsx)
+  speglar gränsen med egna timers (`ABANDON_*`, marginalen `GRACE_MS` efter
+  lådans). **`CHECKING_IN` och dess 30 s finns inte längre** — locket startar
+  pausen direkt. Appens timer för den fasen, och reducerns `checking_in`,
+  är kvar från v7 och ska ses över.
 - **`phone_down` som inkommande meddelande till appen är dödkod:** lådan
-  skickar aldrig `phone_down` som notify (bara `hello`/`state`/`battery`/
-  `touch_*`/`checkin_complete`/`session_started`/`lid_*`/`session_ended`).
-  [lib/bleProtocol.ts](lib/bleProtocol.ts) har ändå kvar en parse-gren och
-  [lib/sessionMachine.ts](lib/sessionMachine.ts) en reducer-case för det —
-  ofarligt men oanvänt i praktiken.
-- **`MIN_SESSION_MS = 5000`** i firmware är ett testvärde (kommentar i
-  källkoden: sätt till `60000` innan skarp drift). En session kortare än
-  detta kastas helt av lådan — inget `session_ended` skickas, appen får
-  aldrig veta att den existerat.
+  skickar det aldrig. [lib/bleProtocol.ts](lib/bleProtocol.ts) och
+  [lib/sessionMachine.ts](lib/sessionMachine.ts) har kvar en gren för det.
+- **`MIN_SESSION_MS = 5000`** är ett testvärde (sätt `60000` innan skarp
+  drift). Kortare pauser kastas helt, båda vägarna.
 
 ## App-arkitektur, kort
 
@@ -1006,9 +1045,10 @@ Status i appen: alla fyra är implementerade. Se
   fram till locket stängs, plus `abandoned` när lådan tystnat (se de tysta
   timeouterna ovan). Lutningsdetektering via [lib/tilt.ts](lib/tilt.ts)
   (gravitationsvektor, inte `rotation.beta/gamma` — se motivering i filen).
-  **`phonedown`-vyn måste nämna tummarna** — den är sista skärmen användaren
-  kan läsa innan telefonen ligger inne i en stängd låda, och incheckningen är
-  en grind som ingen annars vet finns.
+  **`phonedown`-vyn nämner fortfarande tummarna**, och det är fel sedan v8:
+  locket startar pausen direkt. Skärmen, väntan i `checking_in` och
+  reducerns tumgrenar ([lib/sessionMachine.ts](lib/sessionMachine.ts)) är
+  kvar från v7 och ska ses över innan `POD_COMING_SOON` slås av.
   - **Steget går åt båda håll:** reses telefonen upp igen (≥ 45° i 0,5 s) går
     vyn tillbaka till `standing`, för instruktionen ska alltid stämma med var
     telefonen faktiskt är. Glappet mot nedläggningens 8° är hysteresen — utan
@@ -1024,8 +1064,9 @@ Status i appen: alla fyra är implementerade. Se
     `phaseStartMs` + `phonePlaced`, och finns för att fristen är ett **ankare,
     inte en omstart**. Firmware kör `setPhase(AWAITING_LID)` bara vid
     `set_mode`, vid ett `phone_down` som ändrar `phonePlaced` från false,
-    vid `phone_up` som ändrar den från true, och vid `checking_in` →
-    `awaiting_lid`. Appen måste flytta sitt ankare på exakt de tillfällena och
+    vid `phone_up` som ändrar den från true, och (v8) när appen varit tyst i
+    `PHONE_WAIT_MAX_MS` eller kopplats ner medan `phonePlaced` var false.
+    (`checking_in` → `awaiting_lid` fanns i v7 och är borta.) Appen måste flytta sitt ankare på exakt de tillfällena och
     inga andra: startade den om vid varje vippning kunde skärmen stå kvar
     minuter efter att lådan gått till loggan, och nöjde den sig med ett fast
     ankare skulle den ge upp medan lådan fortfarande väntade.
@@ -1199,18 +1240,75 @@ och raden har `flexWrap` sedan den fjärde kom till: fyra piller med etikett
 ryms inte bredvid varandra på en iPhone SE, och en krympt etikett är samma fel
 som typskalans golv finns för att hindra.
 
-**Men inkorgen har bara två knappar, och ska ha det.** Luren är det som
-ringer (röst och video, via [app/call.tsx](app/call.tsx)); kuvertet är det som
-bara ligger där (text och foto, via `handleQuietChannel`). En tredje ikon på
-rubrikraden hade gjort den till en verktygslåda — samma skäl som kretsens
-rubrikrad inte fick en tredje. Kuvertet är fortfarande ett kuvert: det är vad
-man öppnar, inte vad som ligger i.
+**Inget stödsvar ringer längre — alla fyra landar i ett kuvert.** Röst och
+video kom förr som ett inkommande samtal (`app/call.tsx`, riven): ringsignal,
+vibration, en grön lur och en röd. Det var så likt telefonens egen
+samtalsskärm att det kändes påträngande, och text och foto låg samtidigt
+bakom en annan ikon, så samma sak hade två ingångar. Nu är det ett kort
+överst i fliken (*Anna sent you support · Open the envelope*,
+`SupportInboxCard`) och en skärm,
+[app/support-arrived.tsx](app/support-arrived.tsx): *Support coming your
+way!*, ett kuvert som guppar lugnt med pausens två streck som sigill, och
+*Open* / *Later*. Kuvertet ([components/support-envelope.tsx](components/support-envelope.tsx))
+viker upp fliken, brevet glider ut (med fotot, textens början, eller
+sortens ikon på), och tonar över i samma visningsskärmar som förut.
 
-- `call.tsx` filtrerar numera på `response_type in ('voice','video')`. Frågan
-  tog förut det äldsta oöppnade svaret av vilken sort som helst, trots att
-  luren bara öppnas när det finns röst eller video — ett äldre textsvar kunde
-  alltså ringa som ett samtal. Med fotot blev det värre: `photo` finns inte i
-  ternären som sätter underrubriken och hade fallit igenom till "video".
+- **Det äldsta oöppnade svaret öppnas först**, oavsett sort; *N more
+  waiting* står under kuvertet. Kortet i fliken namnger däremot det senaste.
+- **Svaret räknas som öppnat i visningsskärmen, inte i kuvertet.** *Later*
+  lämnar det oöppnat med brickan kvar.
+- Ett tryck på notisen *Anna sent you support* går rakt till kuvertet.
+- **Röst- och videovisningen är inte längre samtal**: ingen upplyftnings- och
+  lurton, röst i högtalaren och inte i hörsnäckan, ingen högtalarknapp, och
+  *Close* i stället för en röd lur. Videon visar inte längre den egna
+  kamerabilden i hörnet och kräver därför ingen kamerabehörighet för att
+  spelas. Ljudfilerna `Ringsignal.mp3`, `Pickupsound.mp3` och
+  `HangUpSound.mp3` ligger kvar oanvända.
+- **Kuvertet är nästan vitt med en aning persika**, i båda lägena: krämvit
+  ficka, persikofärgad insida och flik, en tunn terrakottakant, skugga och en
+  persikofärgad glöd bakom. Krämvitt utan kant smälte in i rummets botten,
+  och ett blått kuvert prövades och föll på begäran. Sigillet är pausens två
+  streck i ljust på terrakotta (ett hjärta satt där först).
+- **Textsvaret är ett brev, inte en sms-tråd** ([app/text-message.tsx](app/text-message.tsx)):
+  samma krämvita papper som brevet i kuvertet (`LETTER_PAPER`), *From Anna*
+  överst, texten handskriven i Kalam på linjer med samma steg (`LINE`), lite
+  snett, och det glider in där kuvertets brev slutade. Kalam passar regeln:
+  det är något någon skrivit.
+- **Man kan skicka ett hjärta tillbaka** ([supabase/support_thanks.sql](supabase/support_thanks.sql),
+  körs för hand efter support_photo.sql; [lib/supportThanks.ts](lib/supportThanks.ts)).
+  *Send a heart back* står på alla fyra visningsskärmarna
+  ([components/support-heart-button.tsx](components/support-heart-button.tsx)),
+  i `dangerSoft` som pausens hjärta, och tömmer sig vid ett andra tryck så
+  länge avsändaren inte sett det. Avsändaren får det **en gång**, som ett
+  rosa kort överst i Support-fliken (*Anna sent you a heart · For your
+  support with …*); raderna markeras sedda när de hämtats och kortet står
+  kvar tills fliken lämnas. Så länge förfrågan står kvar bär cirkeln ett
+  hjärta i stället för bocken. Två kolumner på `support_responses`
+  (`thanked_at`, `thanks_seen_at`), skrivna genom RPC:er. **Ingen notis**,
+  och kortet räknas inte in i flikbrickan — det väntar inte på ett svar.
+  **Det finns ingen historik över stöd man fått, med flit:** ett svar syns
+  en gång, och det är en del av varför folk skickar.
+- **Den som skickar kan försegla stödet tills mottagaren pausat**
+  ([supabase/support_sealed.sql](supabase/support_sealed.sql), körs för hand
+  efter support_photo.sql och sleep.sql; kör om social_notify.sql efteråt).
+  *CHOOSE WHEN DAG CAN OPEN IT* och ett smalt tvåläges-reglage, *Now /
+  ⏸ After a pause*, står ovanför *Send* på alla fyra svarsskärmarna
+  ([components/opens-picker.tsx](components/opens-picker.tsx)), med *Now*
+  som förval. Det ska vara diskret: två stora piller under *OPENS* och en
+  förklarande rad var för mycket och togs bort på begäran. Knappen heter
+  *Send* i båda lägena. Efter ett förseglat svar trycks pausens sigill på
+  ett litet kuvert som flyger iväg (`SealedSendOverlay`). Avsändarens
+  cirkel bär **bocken** som vilket skickat svar som helst — ett pausmärke
+  där lästes som att personen pausade. Bara två lägen och ingen ångra, med
+  flit.
+  - Mottagaren får notisen *Dag sent you support · Take a pause to open.*,
+    ett kort i Support-fliken med samma rad och en *Pause*-knapp, och efter
+    en paus på minst 3 min (`support_unlock_min_seconds`, `kind = 'pause'`)
+    *Your envelope is ready* på Hem, i puffarnas plats, som öppnar kuvertet.
+  - **Spärren sitter i SQL:** en restriktiv SELECT-policy gör ett förseglat
+    svar oläsligt för mottagaren tills en trigger på `pause_sessions` låst
+    upp det, så inkorgen och brickan räknar det inte. `get_sealed_support()`
+    lämnar bara ut vem och när. Ingen notis vid upplåsningen.
 - Både text och foto slutar med samma två val (*I'll take a pause* /
   *Not a good time*). Det är samma sorts pepp som landat på två sätt.
 
@@ -1285,10 +1383,57 @@ samma sorts undantag som Kretsens stege.
 **Ett sjunde undantag, på begäran:** *Done* och dess gloria när Global Pause är slut ([app/global-pause.tsx](app/global-pause.tsx)), i `Palette.success`. Det är en bekräftelse, samma sort som det fjärde och femte.
 Ett nytt grönt någon annanstans ska förklaras på samma sätt eller inte finnas.
 Arial Black-liknande versaler (`fontWeight: '900'` + versaler) för
-displaytext, vanlig vikt för brödtext. Instruktioner på tre till fyra ord,
+displaytext, vanlig vikt för brödtext. **Displaytypsnittet är Archivo Black** ([lib/displayFont.ts](lib/displayFont.ts)), den fria motsvarigheten till webbens Arial Black, och sätts av textomslaget i [lib/fontScaleCap.ts](lib/fontScaleCap.ts) på varje `Text` med `fontWeight: '900'` och ingen egen `fontFamily`. Sätt alltså `'900'` som förut och ingen familj för hand; `DISPLAY_FONT = false` ger tillbaka systemets snitt. Instruktioner på tre till fyra ord,
 inte meningar.
 
-### Flikarna heter Pause, Circle och Friends
+### Flikarna heter Pause, Circle och Support
+
+**Tredje fliken heter Support sedan november 2026, på begäran.** Stödet
+skulle vara sidans huvudfunktion men låg gömt: två små ikoner på rubrikraden
+och en plusbubbla med en grå rubrik bland vännernas ansikten, medan
+vänlistans stora kort var det som syntes. Nu är ordningen väntande stöd
+(ett kort, bara när något väntar), sedan **förfrågningarna som sidans
+hjärta** (`SupportRequests`), sedan pausinbjudningar och vänförfrågningar,
+och sist **vänlistan som lugna rader**: ingen egen yta, hårfina linjer, 38 px
+ansikten, och *Add friend* som en länk på rubrikraden i stället för en hel
+knapp. Ikonen är `hand-holding-heart`.
+
+- **Förfrågningarna är cirklar i en rad, som stories** (`SupportRequests`, 76 px, med luft ovanför),
+  och **den egna står alltid först**, skild från vännernas med en tunn
+  lodrät linje. Den är ens eget ansikte i båda lägena: utan förfrågan med
+  en streckad ring, ett fyllt plus i hörnet och etiketten *Ask*; med en ute
+  med en grön ring (`peer`) och etiketten *Your request*. Grönt är här samma
+  undantag som förut — det skiljer det egna från andras, det bekräftar
+  ingenting. Vännernas har stödets ring (`community`); besvarade står sist,
+  tonade, med en bock. Ett tryck öppnar story-läsaren som förut.
+  Två andra former prövades och föll på begäran: stora kort med toning,
+  toner och en rubrik (*Anna needs you*) var plottriga, och små textkort var
+  otydliga. Cirklarna var det som fungerade — gå inte ifrån dem utan skäl.
+- **En förfrågan går till alla vänner eller till dem man kryssar i.** Valet
+  är en knapp överst i arkets första steg, bredvid rubriken: *Everyone ›*.
+  Rörs den inte går förfrågan till alla, som förut. Ett tryck går in i en
+  lista — *Everyone* överst, sedan vännerna med kryssrutor — och *Done* tar
+  en tillbaka; knappen säger sedan *Anna, Dag* eller *3 friends*, och
+  delningsknappen *Ask 2 friends* / *Ask everyone*. Ett eget tredje steg
+  prövades först och föll på begäran. Valet bor i
+  `support_stories.recipient_ids` (null = alla) och spärras av en
+  **restriktiv** SELECT-policy i [supabase/wishlist.sql](supabase/wishlist.sql),
+  som läggs ovanpå den befintliga utan att röra den. `activate_story` tar
+  `p_recipient_ids` och filtrerar mot accepterade vänner; notistriggern i
+  social_notify.sql knackar bara hos de valda. Den egna förfrågan säger i
+  läsaren vilka den gick till (*Asked Anna, Dag*). **Kör om wishlist.sql och
+  social_notify.sql** innan *Choose friends* används — *alla vänner* skickar
+  inte parametern och fungerar även mot en gammal databas.
+- **Intentionerna i arkets första steg är ett rutnät, inte piller:** alla på
+  en gång, tre i bredd, emoji och etikett i var sin ton (`intentionTone`,
+  samma som pausens kort i statistiken). Pillren bröt rad i en lång rad och
+  gav ingen överblick.
+
+Rutten, rummet och filnamnet
+heter fortfarande `friends` — samma linje som `Palette.community` — och
+resten av dokumentet säger ofta *Friends* om fliken. Asymmetrin nedan (en
+grupp mot enskilda personer) bärs nu av vad fliken *gör* i stället för vad
+den heter. Det som står nedan är historiken före bytet.
 
 Tredje fliken hette **Community** och heter sedan en rapport om att ingen
 förstod skillnaden mot **Circle** i stället `Friends`. Båda orden var
@@ -1609,6 +1754,10 @@ inte bara en egen kulör. Det är den tydligaste skillnad en flik kan ha.
   botten den skulle lyfta. Tabellerna innehåller bara de rum som avviker, och
   allt annat faller tillbaka på förvalet — de svala rummen är oförändrade till
   sista decimalen.
+- **Pause, Circle och Support mörknar uppifrån och nedifrån** (`ROOM_EDGES`
+  i samma fil, på begäran): Pause i navy, Circle i mörkgrönt och Support i
+  mörk terrakotta — rummets egen kulör och inte svart, så att kanten
+  fördjupar rummet i stället för att gråna det.
 - Ljuslägets vinjettkant är varmbrun (`rgb(80,50,30)`) i stället för plommon
   av samma skäl: en sval kant runt en varm botten läser som en smutsrand och
   inte som en skugga.
@@ -1665,7 +1814,7 @@ bara tre av dem är flikar. Resten ärver rummet från vad de *handlar om*:
 |---|---|
 | `pause` | `pause`, `placeinbox`, `pausesummary` |
 | `circle` | `circle-chat`, `circle-create`, `circle-invite`, `circle-welcome` |
-| `friends` | `add-friend`, `support-story-create`, `support-view-text`, `support-respond-text`, `support-respond-voice`, `text-message`, `call`, `voice` |
+| `friends` | `add-friend`, `support-story-create`, `support-view-text`, `support-respond-text`, `support-respond-voice`, `text-message`, `support-arrived`, `voice` |
 | `study` | `stats`, `onboarding` (Settings), `profile` — ingen flik alls |
 | `night` | `pausing`, `global-pause` — ingen flik, och **mörkt i båda lägena** |
 
@@ -1846,6 +1995,40 @@ inte regeln.
   inte längre inne i kretsfliken. Två skärmar väljer samma tal, och två kopior
   av ratten hade glidit isär — samma skäl som `intro-chrome.tsx` finns för att
   stegen inte ska bli sju skelett.
+
+### Vanorna — en intention och dagar i veckan
+
+Efter önskemål från användare om mål kopplade till vanor och inte bara tid.
+Ett vanemål är *📖 Reading · 3× a week*: en intention och ett antal dagar.
+Schemat bor i [supabase/habits.sql](supabase/habits.sql) (körs för hand efter
+`sleep.sql`), klienten i [lib/habits.ts](lib/habits.ts) och raderna i
+[components/habit-goals-editor.tsx](components/habit-goals-editor.tsx).
+
+- **Det är ingen ny registrering.** En vana räknas ur pauser som redan bär
+  intentionen, vald före pausen eller taggad efteråt. Pausen är fortfarande
+  appens enda handling, och taggkortet efter pausen får ett skäl till.
+- **De sätts i dagsmålets ruta på Hem** (ett tryck på ringen), under ratten,
+  och sparas med samma knapp (*Save goals*). Profilens intentioner valdes bort
+  som plats: användarna går inte dit. Rutan heter *Your goals*, med *TIME · a
+  day* och *HABITS · days a week*. *Add a habit* byter rutans innehåll mot
+  *Choose a habit*: alla intentioner som rutor, tre i bredd, i sina egna
+  toner, och de som redan är vanor nedtonade med en bock. En rad chips att
+  svepa i satt där först och gömde de flesta. Sist står **+ Your own**, med
+  profilens två fält (emoji och namn): den nya intentionen sparas som en egen
+  i samma fil (`addCustomCategory` i app/pauseLogger.ts), läggs till bland de
+  som erbjuds före pausen, och blir direkt en vana.
+- **Högst två** (`MAX_HABITS`, speglat i `set_habit_goals`). Två går att
+  hålla i huvudet, och rutan får plats på en iPhone SE.
+- **Fyra regler i `get_habit_progress`:** dagar och inte pauser (två läspauser
+  samma dag är en dag), veckan börjar måndag i användarens egen tid, pauser
+  under fem minuter räknas inte, och bara `kind = 'pause'`.
+- **Etikett eller id:** intentionen ligger som `READING` eller `read`, så
+  målraden sparar båda (`label` kopieras vid sparningen) och räkningen
+  matchar på endera.
+- **Ingen notis, och inget på Hem än.** En tyst rad under ringen
+  (*📖 2/3 · 🚶 1/2*) är nästa steg att pröva, liksom raden på taggkortet
+  (*2 of 3 this week*). Kretsen ser inte vanorna; intentionen har alltid
+  varit privat.
 
 ## Sömnläget — en natt är ingen paus
 
@@ -2266,7 +2449,15 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
       medlemmarna som var med då; den som lämnat står nedtonad, för timmarna
       ligger kvar i ledgern och brickorna ska gå ihop med summan. En gången
       period visar ingen *Set your goal* och ingen *N OF M GOALS SET* — de
-      handlar om nu. En vunnen vecka visar sin `GOAL REACHED · WEEK N`.
+      handlar om nu. En vunnen vecka visar `GOAL REACHED` (veckans nummer, *YOUR FIRST
+      WEEK* / *WEEK N*, togs bort på begäran), med pokalen och ett sken i
+      ljust guld (`GOAL_GOLD`, `#FFD84D`, inte palettstyrt) som andas på 1,6 s och raden som sväller 4 % i samma takt
+      (`GoalReachedLine`); stilla med reducerad rörelse.
+    - **Ett lätt konfettiregn när man kommer in i fliken och veckans mål är
+      nått** (`ConfettiRain` i [components/celebration-burst.tsx](components/celebration-burst.tsx)):
+      en gång per fokus och per kretsbyte, aldrig av fyrsekunderspollen.
+      Samma kulörer och regler som skuren — inget grönt, fasta tal, ingenting
+      med reducerad rörelse.
     - **Målen som gällde då sparas i `circle_week_goals`**, skriven av
       `snapshot_circle_week_goals()` från `evaluate_circle_goals` (raden för
       pågående vecka skrivs om tills veckan vänt). Målet bor annars bara på
@@ -2365,21 +2556,22 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
     trösklar för att kunna rita hela stegen utan en rundtur till servern.
     Ändras en siffra måste båda ändras — annars visar brickan en nivå och
     aktivitetsflödet en annan, och ingen typkontroll fångar det.
-  - **`Legendary` och `MYTHICAL` bryter namnmönstret med flit.** De saknar
-    `Pausers`-suffixet. Det är inte en inkonsekvens att städa bort; de ska
-    sticka ut mot de åtta stegen under. Versalerna är en annan sak:
-    `LEGENDARY` skrevs om till `Legendary`, och `MYTHICAL` står kvar versalt
-    tills någon säger till. I rubrikens nivårad versaliseras alla namn ändå
-    av `toUpperCase()`, så skillnaden syns bara i stegen-modalen.
+  - **Översta steget heter *Masters of PausePod* och bryter namnmönstret
+    med flit.** Det saknar `Pausers`-suffixet så att toppen sticker ut mot
+    stegen under; det är inte en inkonsekvens att städa bort. Det hette
+    `MYTHICAL PAUSERS` och byttes på begäran (november 2026) — det lät som en
+    spelrang. Nivå 9 heter `Legendary Pausers`. Namnen bor bara i klienten,
+    så ett namnbyte kräver ingen SQL.
   - Skalan ersatte en äldre (5/15/40/100/250/500, sedan +500 utan tak). Rader
     som redan ligger i `circle_level_ups` behåller sina nummer men betyder nu
     andra timintervall. Hur den historiken städas står i SQL-filen vid
     funktionerna.
-  - **Stegen har ingen egen sektion i fliken.** Ingången är
-    nivåns märke följt av `LEVEL 6` **på samma rad** (chevronen efter togs
-    bort på begäran — märket visar självt att det går att trycka), direkt under
-    cirkelns namn — versal accenttext, ingen kapsel, enligt layoutspråket
-    nedan — och hela listan i en modal bakom båda. Nivåns namn stod förr på
+  - **Stegen har ingen egen sektion i fliken.** Ingången är nivåns märke,
+    som kretsens vapen **till vänster om namnet**, med `LEVEL 6` under namnet
+    och chatten ytterst till höger på samma rad (`crestRow`, november 2026,
+    på begäran: märket och namnet på var sin rad läste som två rubriker).
+    Versal accenttext, ingen kapsel, enligt layoutspråket nedan. Märket och
+    `LEVEL` öppnar stegen, namnet menyn, och hela listan ligger i en modal. Nivåns namn stod förr på
     raden (`LEVEL 6 · UNSHAKEABLE PAUSERS`) och togs bort på begäran; det
     står i modalen och i `accessibilityLabel`.
   - **Märkena bor i
@@ -2634,13 +2826,20 @@ stämma). `circle_members.user_id` är inte längre `UNIQUE`; paret
   [app/(tabs)/circle.tsx](app/(tabs)/circle.tsx)): en per krets och ett
   `+` så länge det finns plats, i sidled rullbar. Den står där också med en
   enda krets, så att det syns att det går att ha fler. Den valda fylls i
-  rummets `hue` (kapseln är ett val, samma undantag och textregel som
-  periodvalet); en prick på en annan krets betyder olästa i dess chatt, och
-  på `+` en inbjudan man har plats för.
+  **accenten** och de andra är neutrala (`ink06`, `textSecondary`). Den
+  fylldes förr i rummets `hue` och stod då i exakt samma grönt som
+  logotypen precis ovanför, så att de läste som en enda sak. En prick på en
+  annan krets betyder olästa i dess chatt, och på `+` en inbjudan man har
+  plats för.
+  - **Logotypen säger flikens namn:** `PAUSEPOD | CIRCLES` här och
+    `PAUSEPOD | SUPPORT` i Support-fliken (`section` på `PausePodLogo`), i
+    samma versaler och storlek men tunn vikt (300), med ett svagare streck
+    emellan.
   - **Under kapslarna står den valda kretsens namn som rubrik**
     (`CircleTitle`), och ett tryck på den öppnar medlemslistan direkt.
     Namnet står alltså två gånger — i kapseln och i rubriken — och det är
-    priset. Nivån och kretsens tre knappar står på raden under.
+    priset. Nivåmärket står till vänster om namnet och chatten till höger,
+    med `LEVEL` under namnet.
   - **Kapslarna togs tillbaka på begäran.** Däremellan var rubriken ett
     namn med `⌄` som öppnade en väljare (`CirclePicker`: kretsarna,
     *Members of …*, *Join or start another circle*); den är borttagen. En
@@ -2733,16 +2932,18 @@ SQL-editorn efter `circles.sql`, samma konvention som resten), vägen dit i
   en skrivrad som följer tangentbordet. Inne i kretsflikens rullning hade
   den slagits med potten och flödet om samma lodräta utrymme, och skrivraden
   hamnat under tangentbordet längst ner i en lång sida.
-- **Ingången är den enda knappen kvar i rubrikraden (`headerActions`)**, till
-  höger om nivån under kretsens namn. Raden bar en gång fyra ikoner och
+- **Ingången är den enda knappen kvar i rubrikraden (`crestRow`)**, ytterst
+  till höger om nivåmärket och kretsens namn. Raden bar en gång fyra ikoner och
   sedan tre (belöningen, veckan, chatten); belöningen och veckan flyttade in
   i kretsens meny bakom namnet på begäran, för att sidan skulle bli renare.
   Chatten stannade framme för att den används oftast och för att dess prick
   måste synas — en prick bakom en meny blir en prick på menyn, och då säger
   den inte längre *vad*. Knapparna har vandrat: en stapel bredvid
-  nivåmärket, en kolumn bredvid pottens streck, och nu en rad till höger om
-  nivån. Samma rad som namnet prövades och flyttades tillbaka: namnet fick
-  för lite plats.
+  nivåmärket, en kolumn bredvid pottens streck, en rad till höger om
+  nivån, och nu på namnets rad. Samma rad som namnet prövades en gång och
+  flyttades tillbaka: namnet fick för lite plats. Nu delar den raden med
+  märket också, och namnet står därför i 24 i stället för 30
+  (`titleCompact`) och krymper med ellips före märket och chatten.
   - Samma kvadrat, radie och ram som veckoknappen i stats.tsx.
   - Ikonen är en **fylld** bubbla (`comment` med `solid`): den ska hittas
     utan att man letar, och en kontur försvinner bland kretsflikens

@@ -27,15 +27,40 @@
  * `main` i package.json tillbaka till `expo-router/entry` försvinner taket
  * tyst.
  */
-import { createElement } from 'react';
+import { createElement, useSyncExternalStore } from 'react';
+import { StyleSheet } from 'react-native';
+
+import { DISPLAY_FAMILY, isDisplayFontReady, subscribeDisplayFont } from './displayFont';
 
 export const MAX_FONT_SCALE = 1.3;
 
-function capModule(mod: { default?: unknown } | undefined) {
+/**
+ * Samma omslag ger displaytexten sitt typsnitt (se displayFont.ts): en text
+ * med `fontWeight: '900'` och ingen egen `fontFamily` får Archivo Black.
+ * Bara `Text` — ett textfält skriver man i, och det är aldrig display.
+ */
+function withDisplayFont(style: unknown, ready: boolean) {
+  if (!ready || !style) return style;
+  const flat = StyleSheet.flatten(style as any);
+  if (!flat || flat.fontFamily) return style;
+  if (flat.fontWeight !== '900' && (flat.fontWeight as unknown) !== 900) return style;
+  return [style, { fontFamily: DISPLAY_FAMILY, fontWeight: 'normal' }];
+}
+
+function capModule(mod: { default?: unknown } | undefined, display = false) {
   const Original = mod?.default as any;
   if (!mod || !Original || Original.__fontScaleCapped) return;
-  const Capped: any = (props: Record<string, unknown>) =>
-    createElement(Original, { maxFontSizeMultiplier: MAX_FONT_SCALE, ...props });
+  const Capped: any = display
+    ? (props: Record<string, unknown>) => {
+      const ready = useSyncExternalStore(subscribeDisplayFont, isDisplayFontReady);
+      return createElement(Original, {
+        maxFontSizeMultiplier: MAX_FONT_SCALE,
+        ...props,
+        style: withDisplayFont(props.style, ready),
+      });
+    }
+    : (props: Record<string, unknown>) =>
+      createElement(Original, { maxFontSizeMultiplier: MAX_FONT_SCALE, ...props });
   // Statiska fält (`TextInput.State` m.fl.) följer med.
   Object.assign(Capped, Original);
   Capped.displayName = Original.displayName ?? 'Text';
@@ -45,7 +70,7 @@ function capModule(mod: { default?: unknown } | undefined) {
 
 try {
   /* eslint-disable @typescript-eslint/no-require-imports */
-  capModule(require('react-native/Libraries/Text/Text'));
+  capModule(require('react-native/Libraries/Text/Text'), true);
   capModule(require('react-native/Libraries/Components/TextInput/TextInput'));
   /* eslint-enable @typescript-eslint/no-require-imports */
 } catch {
