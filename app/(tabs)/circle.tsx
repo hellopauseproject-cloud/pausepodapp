@@ -119,7 +119,7 @@ function CircleSwitcher({ circles, selectedId, adding, unread, canAdd, invites, 
 }) {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
-  const onFill = Palette.onAccent;
+  const onFill = Palette.hue;
   return (
     <View style={styles.switcherWrap}>
       <ScrollView
@@ -1570,7 +1570,7 @@ function CircleScreen() {
     return (
       <View style={styles.container}>
         <View style={[styles.emptyLogo, { top: Math.max(60, insets.top + 8) }]}>
-          <PausePodLogo section="Circles" />
+          <PausePodLogo />
         </View>
         <JoinOrCreate
           title="No circle yet"
@@ -1591,7 +1591,7 @@ function CircleScreen() {
     <>
       {/* Samma logotyp som överst på Hem och i Support. */}
       <View style={styles.logo}>
-        <PausePodLogo section="Circles" />
+        <PausePodLogo />
       </View>
       <CircleSwitcher
         circles={myCircles}
@@ -2399,11 +2399,13 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 6,
     height: 34, paddingHorizontal: 14, borderRadius: Radius.pill,
     backgroundColor: Palette.ink06, maxWidth: 200,
+    borderWidth: 1.5, borderColor: 'transparent',
   },
-  // Den valda kretsen är ifylld i accenten, inte i rummets `hue`: i hue
-  // stod väljaren i exakt samma kulör som logotypen ovanför och läste som
-  // en del av den.
-  switcherPillOn: { backgroundColor: Palette.accent },
+  // Den valda kretsen är en grön ton med grön kant och grön text — inte
+  // ifylld. Ifylld i `hue` läste som en del av logotypen, och ifylld i
+  // accenten kändes främmande i det gröna rummet. Kanten finns (genomskinlig)
+  // också på de ovalda, så att kapseln inte ändrar storlek vid valet.
+  switcherPillOn: { backgroundColor: Palette.hueTint, borderColor: Palette.hue },
   switcherAdd: { width: 34, paddingHorizontal: 0, justifyContent: 'center' },
   switcherText: { fontSize: 14, fontWeight: '800', color: Palette.textSecondary, flexShrink: 1 },
   // Olästa i en annan krets, eller en inbjudan bakom `+`. Innanför kapseln

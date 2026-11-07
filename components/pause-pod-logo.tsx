@@ -3,9 +3,10 @@ import { StyleSheet, Text, View } from 'react-native';
 import { usePalette } from '../contexts/ThemeContext';
 
 // Samma märke som joinpausepod.com: två rundade streck och ordet i
-// displayvikt. Måtten är webbens (`.pause i` 0.4 × 1.15rem, glapp 0.22rem,
-// texten 0.9rem med 0.24em spärrning) räknade mot textens storlek, så att
-// märket behåller formen i alla storlekar.
+// displayvikt. Måtten är webbens (`.pause i` 0.4 × 1.15rem, texten 0.9rem med
+// 0.24em spärrning) räknade mot textens storlek, så att märket behåller formen
+// i alla storlekar. Glappet är appikonens: lika brett som ett streck (det var
+// webbens 0.22rem).
 //
 // Strecken och ordet bär rummets kulör (`hue`), för det är logotypen som
 // säger vilket rum man står i. (På webben står ordet i bläck; i appen fick det
@@ -36,7 +37,7 @@ export function PausePodLogo({
       accessibilityRole="image"
       accessibilityLabel={section ? `PausePod, ${section}` : 'PausePod'}
     >
-      <View style={[styles.row, { gap: unit * 0.22 }]}>
+      <View style={[styles.row, { gap: unit * 0.4 }]}>
         {[0, 1].map(i => (
           <View
             key={i}

@@ -330,6 +330,9 @@ function PausingScreen() {
   // telefon nedåt för att bli ostörd har redan sagt vad hen vill.
   const faceDownPlayer = useAudioPlayer(require('../assets/images/Facedown.mp3'));
   const faceUpPlayer = useAudioPlayer(require('../assets/images/Faceup.mp3'));
+  // En natt börjar med en godnatt i stället för nedläggningens klick, och
+  // bara första gången: efter ett uppvaknande är natten redan igång.
+  const goodnightPlayer = useAudioPlayer(require('../assets/images/goodnight.mp3'));
 
   // `seekTo(0)` före `play()`, för samma spelare används många gånger per
   // paus och står kvar vid klippets slut efter första vändningen — utan
@@ -554,8 +557,9 @@ function PausingScreen() {
         faceChangedAtRef.current = null;
         restingRef.current = down;
         if (down) {
+          if (!isSleep) playCue(faceDownPlayer);
+          else if (!hasRestedRef.current) playCue(goodnightPlayer);
           hasRestedRef.current = true;
-          playCue(faceDownPlayer);
           noteRested(nowMs);
         } else if (hasRestedRef.current) {
           // Inget uppåtljud under en natt: ett pip när någon tar telefonen

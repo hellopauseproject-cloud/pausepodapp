@@ -593,7 +593,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     shadowColor: Palette.accent, shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.55, shadowRadius: 22, elevation: 12,
   },
-  glyph: { flexDirection: 'row', gap: 5 },
+  glyph: { flexDirection: 'row', gap: 6 },
   glyphBar: { width: 6, height: 18, borderRadius: 3, backgroundColor: Palette.onAccent },
   inLine: { fontSize: 17, color: Palette.textPrimary, textAlign: 'center' },
   quiet: { fontSize: 14, lineHeight: 20, color: Palette.textSecondary, textAlign: 'center' },

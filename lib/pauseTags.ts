@@ -1,3 +1,4 @@
+import { recordPauseInCircle } from './circles';
 import { supabase } from './supabase';
 
 /**
@@ -39,6 +40,12 @@ export type PendingPauseTag = {
   alreadyTagged: boolean;
   /** Ska Hem ringa? Nej om sammanfattningen redan gjort det. */
   bell: boolean;
+  /**
+   * En ensam lådpaus får *Sleep* bland taggarna. En telefonpaus får det
+   * inte — en natt utan låda startas med SLEEP i nattläget — och en delad
+   * paus kan inte bli en natt.
+   */
+  sleepable: boolean;
   at: number;
 };
 
@@ -46,8 +53,8 @@ export type PendingPauseTag = {
 const PENDING_MAX_AGE_MS = 10 * 60 * 1000;
 let pending: PendingPauseTag | null = null;
 
-export function setPendingPauseTag(durationSeconds: number, alreadyTagged: boolean, bell = true) {
-  pending = { durationSeconds, alreadyTagged, bell, at: Date.now() };
+export function setPendingPauseTag(durationSeconds: number, alreadyTagged: boolean, bell = true, sleepable = false) {
+  pending = { durationSeconds, alreadyTagged, bell, sleepable, at: Date.now() };
 }
 
 /** Lappen, en gång. Nästa anrop svarar `null`. */
@@ -118,4 +125,29 @@ export async function setPauseIntention(
     .select('id');
   if (error) console.log('[pauseTags] update failed:', error.message);
   return !error && (data?.length ?? 0) > 0;
+}
+
+/**
+ * *Sleep* bland taggarna: pausen blir en natt (`kind = 'sleep'`), och
+ * kretsen tappar den — se supabase/sleep_tag.sql. Det är så en lådpaus blir
+ * en natt, för lådan vet inte vilket det är. Bara lådpauser; en telefonpaus
+ * blir en natt genom att startas med SLEEP.
+ */
+export async function tagPauseAsSleep(sessionId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('tag_pause_as_sleep', { p_session_id: sessionId });
+  if (error) console.log('[pauseTags] tag_pause_as_sleep failed:', error.message);
+  return !error && data === true;
+}
+
+/**
+ * En taggad natt får en intention i stället: den blir en paus igen, med
+ * etiketten, och räknas in i kretsen som en nysparad. Bara en natt som
+ * taggats går tillbaka — inte en som startades med SLEEP.
+ */
+export async function untagSleep(sessionId: string, label: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('untag_sleep', { p_session_id: sessionId, p_intention: label });
+  if (error) console.log('[pauseTags] untag_sleep failed:', error.message);
+  if (error || data !== true) return false;
+  await recordPauseInCircle(sessionId, label);
+  return true;
 }

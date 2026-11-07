@@ -136,9 +136,16 @@ precis som ringen på Hem, inte ur `tz_offset_minutes`. `pg_net` droppas inte:
 extensionen är delad.
 
 **`expo-notifications` är installerat igen** (`~0.32.17`, SDK 54) och dess
-config-plugin är tillbaka i `app.json` med bara `color: "#2e86de"` — appens
-accent, så att Androids lilla ikon tonas rätt. Ett eget monokromt notisikon
-finns inte; utan det använder Android appikonen. Android-behörigheterna
+config-plugin är tillbaka i `app.json` med `color: "#2e86de"` — appens
+accent, så att Androids lilla ikon tonas rätt — och `icon:
+"./assets/images/notification-icon.png"`, pausens två streck i vitt på
+transparent, eftersom Android bara läser alfakanalen (utan den blev appikonen
+en grå klump). Appikonen är webbsidans märke (joinpausepod.com:s
+favicon, något större glipa mellan strecken) i pausknappens ljus: strecken som
+upplyst glas, ljusa upptill och djupare nedtill med en hårfin kant och ett
+svagt sken, framför PAUSE-glöden på en navy som mörknar nedåt. Androids
+adaptiva ikon är samma bild i två lager (skenet i förgrunden), inzoomad så att
+den ser likadan ut efter beskärningen. Android-behörigheterna
 `POST_NOTIFICATIONS` och `RECEIVE_BOOT_COMPLETED` står uttryckligen i
 `app.json` trots att biblioteket deklarerar dem själv i sitt manifest —
 explicit, så att manifestet och det här dokumentet inte kan säga olika.
@@ -1262,8 +1269,8 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
   lurton, röst i högtalaren och inte i hörsnäckan, ingen högtalarknapp, och
   *Close* i stället för en röd lur. Videon visar inte längre den egna
   kamerabilden i hörnet och kräver därför ingen kamerabehörighet för att
-  spelas. Ljudfilerna `Ringsignal.mp3`, `Pickupsound.mp3` och
-  `HangUpSound.mp3` ligger kvar oanvända.
+  spelas. Samtalsljuden (`Ringsignal.mp3`, `Pickupsound.mp3`,
+  `HangUpSound.mp3`) är raderade.
 - **Kuvertet är nästan vitt med en aning persika**, i båda lägena: krämvit
   ficka, persikofärgad insida och flik, en tunn terrakottakant, skugga och en
   persikofärgad glöd bakom. Krämvitt utan kant smälte in i rummets botten,
@@ -1357,7 +1364,7 @@ enda bekräftelsefärg (checkmark i startceremonin). Använd inte grönt i appen
 **bekräftelse** — det är den betydelsen som hör lådan till. Tre undantag, och
 alla tre är just undantag från betydelsen snarare än från kulören: svara-knappen
 i ett inkommande samtal (`Palette.callAccept`), där grönt betyder "svara", de
-två nedersta nivåmärkena i Kretsens stege (`peer`, `slideAccent.green`), där
+två nedersta nivåmärkena i Kretsens stege (lime och smaragd i `JEWELS`), där
 grönt är början på ett färgspektrum och står för *grodd*, inte för klart, och
 **Kretsflikens rum** (`hue` `#6cc99a` mörkt / `#23845a` ljust), där grönt är
 *vilket rum man står i*. Det tredje är det största och därför värt att säga
@@ -1405,7 +1412,10 @@ knapp. Ikonen är `hand-holding-heart`.
   med en grön ring (`peer`) och etiketten *Your request*. Grönt är här samma
   undantag som förut — det skiljer det egna från andras, det bekräftar
   ingenting. Vännernas har stödets ring (`community`); besvarade står sist,
-  tonade, med en bock. Ett tryck öppnar story-läsaren som förut.
+  tonade, med en bock. Ett tryck öppnar story-läsaren som förut. Bakom varje
+  cirkel som väntar står ett mjukt sken i ringens kulör som andas på 6 s
+  (`BubbleGlow`, samma andning som skenet bakom PAUSE); besvarade har inget,
+  och med reducerad rörelse står det still.
   Två andra former prövades och föll på begäran: stora kort med toning,
   toner och en rubrik (*Anna needs you*) var plottriga, och små textkort var
   otydliga. Cirklarna var det som fungerade — gå inte ifrån dem utan skäl.
@@ -2181,6 +2191,22 @@ Schemat bor i [supabase/sleep.sql](supabase/sleep.sql), klientsidan i
     Gå inte tillbaka till procent.
   - **Diagrammet ovanför listan räknar bara pauser** (`pauseSessions`) — en
     natt hade gjort det till ett sömndiagram.
+- **En paus kan taggas som natt i efterhand**, och det är så lådan får
+  nätter: lådan vet inte vilket det är, så både NFC-pausen och appens lådpaus
+  sparas som `'pause'`. *SLEEP* står sist bland intentionerna, på taggkortet
+  på Hem och under pausens kort i statistiken, som en marinblå kapsel med
+  månen (`SleepChip` i [components/pause-tag-chips.tsx](components/pause-tag-chips.tsx)).
+  **Bara för ensamma lådpauser** (`with_pod`): en telefonpaus blir en natt
+  genom att startas med SLEEP i nattläget. `tag_pause_as_sleep`
+  ([supabase/sleep_tag.sql](supabase/sleep_tag.sql), körs efter sleep.sql och
+  circles.sql, **före appen** — statistiken väljer `tagged_as_sleep`) gör
+  raden till en natt och tar bort dess ledgerrader och flödesrader, så att
+  natten är privat också i efterhand. Det som redan hänt står kvar
+  (dagsmålsnotisen, en låst vecka, en nivå, tiden i en Global Pause). På en
+  taggad natt går SLEEP att trycka på: intentionerna öppnas under kortet, och
+  en av dem gör natten till en paus med den etiketten (`untag_sleep`), som
+  räknas in i kretsen igen. En natt startad med SLEEP går inte att göra till
+  en paus.
 - **Körordning:** sleep.sql först, sedan om dailygoal.sql, circles.sql och
   analytics.sql. Klienten filtrerar på `kind`, så **en app med det här ute
   före SQL:en får tomma listor** i statistik, wrapped och Friends.
@@ -2580,43 +2606,34 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
     över namn och timmar; hur ett steg *ser ut* är en annan sak och hör till
     komponenten. Lägger man till ett steg måste båda listorna växa — de
     indexeras på samma sätt (index 0 = nivå 1).
-    - **Ritade utan `react-native-svg`** trots att biblioteket numera finns i
-      bundeln (se *Plommon, rum och bakgrunden*). Skälet är inte längre att en
-      native-modul saknas utan att de inte behöver en: ett märke är en **form**,
-      och en form går att bygga av kanter. Toningar går inte, och det är därför
-      bakgrunden fick undantaget och det här inte gjorde det. Att skriva om dem
-      i svg vore en ändring utan ett syfte. Stjärnan bakom skivan är N
-      kvadrater vridna `90 / N` grader ifrån varandra — två ger åtta uddar,
-      fyra ger sexton. Geometrin hänger ihop: en kvadrat med sidan
-      `0.66 × size` har hörnen `0.47 × size` från mitten medan skivan når
-      `0.34`, och det glappet *är* uddarna. Ändrar man skivan måste
-      kvadraterna följa med, annars slukas stjärnan eller spretar utanför.
-    - **Upptrappningen är hela poängen.** Alla tio har färg, och tonen
-      vandrar uppför spektrumet: mossgrön → grön → turkos → blå → ljusblå →
-      lila → orkidé → rosa → guld → regnbåge. Samtidigt växer stjärnan (0 →
-      16 uddar), ringen blir dubbel från steg 6 och glöden tänds vid 8.
-      Stjärnan börjar på steg 5 med två kvadrater: steg 4 hade en, och en
-      ensam kvadrat läste som en ljusblå ruta bakom märket. Båda
-      trapporna är monotona — ett steg får aldrig färre uddar eller tunnare
-      ring än steget under, annars ser klättringen ut som ett tapp.
-    - Tonerna 1–9 är **befintliga palettnycklar** (`peer`, `slideAccent.*`,
-      `accent`, `accentSoft`, `highlight`), så märkena byter ljust/mörkt läge
-      med resten av appen. Att steg 1–2 är gröna är ett medvetet undantag från
-      grönregeln ovan — se den.
-    - **Steg 6 läser `slideAccent.violet` och inte `community`, och det är en
-      rättad bugg.** Det lånade stödets kulör, vilket gick bra så länge den var
-      lila — men `community` är varm kakao sedan Friends-rummet blev varmt, och
-      då la stegen ett **brunt** steg mellan ljusblått och orkidé. Spektrumet
-      är det stegen är byggda av, så ett steg får inte byta familj för att en
-      annan funktion bytt färg. Lån av en rollnyckel som kan tänkas byta kulör
-      hör inte hemma här: ta en `slideAccent`, som bara betyder "den här
-      sidans färg".
-    - **Regnbågen på steg 10 är det enda som inte är palettstyrt.** Dess åtta
-      kulörer är hårdkodade och temaoberoende, för en regnbåge är samma
-      regnbåge mot vilken botten som helst. Den ritas av två runda `View`-ar
-      med fyra olika `border*Color` var, den yttre vriden 45°: React Native
-      byter kantfärg längs diagonalerna, så varje ring blir fyra bågar och de
-      två tillsammans åtta. Samma egenhet som progressringen bygger på.
+    - **Skivan är svg och glänser** (november 2026, på begäran): de platta
+      palettfärgerna lästes som appens förvalda grönt och blått, inte som
+      märken. Skivan är en radiell toning från en ljus punkt uppe till vänster
+      till en djup ton, med den djupa tonen som kant, en ljus linje innanför
+      (fasningen), en glans över övre halvan och en liten skarp reflex.
+      Ikonen är vit med en skugga i djup ton. Stjärnan och ringarna är
+      fortfarande View-ar. Stjärnan bakom skivan är N kvadrater vridna
+      `90 / N` grader ifrån varandra — två ger åtta uddar, fyra ger sexton.
+      Geometrin hänger ihop: en kvadrat med sidan `0.66 × size` har hörnen
+      `0.47 × size` från mitten medan skivan når `0.34`, och det glappet
+      *är* uddarna. Ändrar man skivan måste kvadraterna följa med.
+    - **Upptrappningen är hela poängen.** Tonen vandrar uppför spektrumet som
+      ädelstenar: lime → smaragd → akvamarin → safir → indigo → ametist →
+      magenta → rubin → guld → regnbåge. Samtidigt växer stjärnan (0 → 16
+      uddar), ringen blir dubbel från steg 6 och glöden tänds vid 8. Stjärnan
+      börjar på steg 5 med två kvadrater: en ensam kvadrat läste som en ruta
+      bakom märket. Båda trapporna är monotona — ett steg får aldrig färre
+      uddar eller tunnare ring än steget under.
+    - **Tonerna är inte palettnycklar** (`JEWELS`, ljus/bas/djup per steg)
+      och byter inte med ljust/mörkt läge — ett märke är ett föremål med egen
+      kulör, som post-it-lappen. Det löser också den gamla buggen där steg 6
+      lånade `community` och blev brunt när stödets kulör byttes: inget steg
+      lånar längre en rollnyckel. Att steg 1–2 är gröna är ett medvetet
+      undantag från grönregeln ovan — se den.
+    - **Regnbågen på steg 10** är åtta hårdkodade kulörer: en diagonal toning
+      över skivan, och två runda `View`-ar med fyra olika `border*Color` var,
+      den yttre vriden 45° — React Native byter kantfärg längs diagonalerna,
+      så de två ringarna blir åtta bågar.
     - Låsta märken ritas i `textDisabled` men med **samma form**: man ska
       kunna se vad man är på väg mot, inte bara att något saknas.
   - **Alla tio steg är synliga, men bara nästa räknar ner.** En stege vars
@@ -2825,16 +2842,16 @@ stämma). `circle_members.user_id` är inte längre `UNIQUE`; paret
 - **Kretsraden överst i fliken är kapslar** (`CircleSwitcher` i
   [app/(tabs)/circle.tsx](app/(tabs)/circle.tsx)): en per krets och ett
   `+` så länge det finns plats, i sidled rullbar. Den står där också med en
-  enda krets, så att det syns att det går att ha fler. Den valda fylls i
-  **accenten** och de andra är neutrala (`ink06`, `textSecondary`). Den
-  fylldes förr i rummets `hue` och stod då i exakt samma grönt som
-  logotypen precis ovanför, så att de läste som en enda sak. En prick på en
-  annan krets betyder olästa i dess chatt, och på `+` en inbjudan man har
-  plats för.
-  - **Logotypen säger flikens namn:** `PAUSEPOD | CIRCLES` här och
-    `PAUSEPOD | SUPPORT` i Support-fliken (`section` på `PausePodLogo`), i
-    samma versaler och storlek men tunn vikt (300), med ett svagare streck
-    emellan.
+  enda krets, så att det syns att det går att ha fler. Den valda är en
+  **grön ton med grön kant och grön text** (`hueTint`, `hue`), inte
+  ifylld, och de andra är neutrala (`ink06`, `textSecondary`). Ifylld i
+  `hue` stod den i exakt samma grönt som logotypen och läste som en del av
+  den; ifylld i accenten kändes blått fel i det gröna rummet (båda föll på
+  begäran). En prick på en annan krets betyder olästa i dess chatt, och på
+  `+` en inbjudan man har plats för.
+  - **Logotypen står ensam**: `| CIRCLES` och `| SUPPORT` bredvid den
+    (`section` på `PausePodLogo`) togs bort på begäran. Propen finns kvar
+    oanvänd.
   - **Under kapslarna står den valda kretsens namn som rubrik**
     (`CircleTitle`), och ett tryck på den öppnar medlemslistan direkt.
     Namnet står alltså två gånger — i kapseln och i rubriken — och det är

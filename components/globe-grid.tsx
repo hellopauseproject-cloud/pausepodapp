@@ -35,10 +35,10 @@ const TILT = 0.2;               // hur mycket breddgraderna lutar mot betraktare
 // Ribbon, mättare än flikarnas ljusa toner så att nätet bär färg.
 const RIBBON = ['#5aa9f5', '#4fd193', '#f9a25e'] as const;
 
-// Märket: logotypens proportioner (streck 0.4 × 1.15, glapp 0.22). Höjden är
-// en andel av klotet (`markSize`).
+// Märket: logotypens proportioner (streck 0.4 × 1.15, glapp ett streck brett,
+// som appikonen). Höjden är en andel av klotet (`markSize`).
 const MARK_W_PER_H = 0.4 / 1.15;
-const MARK_GAP_PER_H = 0.22 / 1.15;
+const MARK_GAP_PER_H = 0.4 / 1.15;
 const MARK_TOP = '#173f8a';     // samma mörkblå som veckans korts klot
 const MARK_BOTTOM = '#0f2a63';
 const MARK_GLOW = '#BFDDFF';    // designsystemets Sky 200

@@ -380,9 +380,10 @@ function InnerLayout() {
 
     router.replace({
       pathname: '/pausesummary',
-      params: { duration, category, sharedWithName, sharedSessionId },
+      // `withPod`: bara en lådpaus kan taggas som natt (lib/pauseTags.ts).
+      params: { duration, category, sharedWithName, sharedSessionId, withPod: sessionState.withPod ? '1' : '' },
     } as never);
-  }, [sessionState.phase, sessionState.lastEnded, sessionState.category, sessionState.sharedWithName, sessionState.sharedSessionId, sessionState.pauseType, sessionDispatch]);
+  }, [sessionState.phase, sessionState.lastEnded, sessionState.category, sessionState.sharedWithName, sessionState.sharedSessionId, sessionState.pauseType, sessionState.withPod, sessionDispatch]);
 
   // Global lyft-detektering: skickar phone_up bara medan appen vet att en
   // box-session pågår (efter session_started, före session_ended).

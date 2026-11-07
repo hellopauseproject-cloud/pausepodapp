@@ -92,11 +92,12 @@ export function IntentionSettings() {
               accessibilityRole="checkbox"
               accessibilityState={{ checked: on }}
             >
-              <Text style={styles.chipEmoji}>{cat.emoji}</Text>
+              {on && <FontAwesome5 name="check" size={10} color={Palette.onAccent} />}
+              <Text style={[styles.chipEmoji, !on && styles.chipEmojiOff]}>{cat.emoji}</Text>
               <Text style={[styles.chipLabel, on && styles.chipLabelSelected]}>{cat.label}</Text>
               {custom.some(c => c.id === cat.id) && (
                 <TouchableOpacity onPress={() => removeCustom(cat.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <FontAwesome5 name="times" size={10} color={Palette.textFaint} />
+                  <FontAwesome5 name="times" size={10} color={on ? Palette.onAccent : Palette.textFaint} />
                 </TouchableOpacity>
               )}
             </TouchableOpacity>
@@ -158,13 +159,16 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: Palette.surfaceAlt, borderWidth: 1.5, borderColor: Palette.surfaceAlt,
+    backgroundColor: 'transparent', borderWidth: 1.5, borderColor: Palette.ink22,
     borderRadius: Radius.pill, paddingVertical: 7, paddingHorizontal: 10,
   },
-  chipSelected: { borderColor: Palette.hue, backgroundColor: Palette.hueTint },
+  // Valt är ifyllt i accenten med en bock, ovalt bara en kontur med tonad emoji:
+  // en ton av rummets kulör över surfaceAlt gick knappt att skilja från ovalt.
+  chipSelected: { borderColor: Palette.accent, backgroundColor: Palette.accent },
   chipEmoji: { fontSize: 14 },
-  chipLabel: { color: Palette.textSecondary, fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5 },
-  chipLabelSelected: { color: Palette.textPrimary },
+  chipEmojiOff: { opacity: 0.45 },
+  chipLabel: { color: Palette.textTertiary, fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5 },
+  chipLabelSelected: { color: Palette.onAccent },
   addSection: {
     marginTop: 20, backgroundColor: Palette.surfaceAlt, borderRadius: Radius.xl, padding: 16,
     borderWidth: 1, borderColor: Palette.surfaceBorder,

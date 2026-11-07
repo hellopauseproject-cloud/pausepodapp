@@ -8,7 +8,7 @@ import { usePalette } from '../contexts/ThemeContext';
 import { Category, getSelectedCategories } from '../app/pauseLogger';
 import { track } from '../lib/analytics';
 import { formatDuration } from '../lib/circles';
-import { findJustEndedSessionId, setPauseIntention } from '../lib/pauseTags';
+import { findJustEndedSessionId, setPauseIntention, tagPauseAsSleep } from '../lib/pauseTags';
 import { CelebrationBurst } from './celebration-burst';
 import { PauseTagChips } from './pause-tag-chips';
 
@@ -54,14 +54,20 @@ const REWARD_LINES: Record<string, string> = {
   create: 'Made something. Nice.',
   music: 'Good vibes only.',
   nature: 'Outside. Good call.',
+  sleep: 'Sleep well.',
 };
+const SLEEP_PICK: Category = { id: 'sleep', label: 'SLEEP', emoji: '🌙' };
 const REWARD_FALLBACK = 'Time well spent.';
 
 export function PauseTagSheet({
-  durationSeconds, onClose, onHeight, bottomPadding,
+  durationSeconds, sleepable, onClose, onSlept, onHeight, bottomPadding,
 }: {
   durationSeconds: number;
+  /** Bara en ensam lådpaus får *Sleep* (lib/pauseTags.ts). */
+  sleepable: boolean;
   onClose: () => void;
+  /** Pausen blev en natt: Hem hämtar om dagens siffra, som just tappade den. */
+  onSlept: () => void;
   /** Kortets uppmätta höjd — Hem lyfter heron med den. */
   onHeight: (h: number) => void;
   bottomPadding: number;
@@ -86,11 +92,15 @@ export function PauseTagSheet({
     setBurst(k => k + 1);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
+    const isSleep = c === SLEEP_PICK;
     const id = await findJustEndedSessionId(user.id, durationSeconds);
-    const ok = id ? await setPauseIntention(id, user.id, c.label) : false;
+    const ok = id
+      ? await (isSleep ? tagPauseAsSleep(id) : setPauseIntention(id, user.id, c.label))
+      : false;
     if (!aliveRef.current) return;
     if (ok) {
-      track('pause_tagged', { category: c.id, where: 'home' });
+      track(isSleep ? 'pause_tagged_as_sleep' : 'pause_tagged', { category: c.id, where: 'home' });
+      if (isSleep) onSlept();
       const left = REWARD_MS - (Date.now() - startedAt);
       setTimeout(() => { if (aliveRef.current) onClose(); }, Math.max(0, left));
     } else {
@@ -148,6 +158,8 @@ export function PauseTagSheet({
           onPick={pick}
           disabled={state !== 'open'}
           colorful
+          onPickSleep={sleepable ? () => pick(SLEEP_PICK) : undefined}
+          sleepOn={picked === SLEEP_PICK}
         />
       )}
     </View>

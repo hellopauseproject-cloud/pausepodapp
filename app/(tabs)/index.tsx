@@ -42,6 +42,7 @@ import { startSleep } from '../../lib/sleep';
 import { NightMoon } from '../../components/night-moon';
 import { SegmentedPill } from '../../components/segmented-pill';
 import { supabase } from '../../lib/supabase';
+import { setCachedMyProfile } from '../../lib/myProfile';
 import { getTodos, Todo } from '../../lib/todos';
 import { getHabitProgress, HabitGoal, habitsChanged, setHabitGoals } from '../../lib/habits';
 import { Category, getAllCategories, getSelectedCategories } from '../pauseLogger';
@@ -131,9 +132,9 @@ const STEPPER_TOP = 14;    // luft mellan siffran och målraden
 const STEPPER_H = 32 + STEPPER_TOP; // `goalStepper`: knapparna 32 + marginTop
 // Hur länge målet väntar efter sista trycket på − eller + innan det sparas.
 const GOAL_SAVE_DELAY_MS = 700;
-// Designens streck: 78 breda, 214 höga, 34 isär.
+// Designens streck: 78 breda, 214 höga, och ett streck isär som appikonen.
 const BAR_W_RATIO = 78 / 214;
-const BAR_GAP_RATIO = 34 / 214;
+const BAR_GAP_RATIO = 78 / 214;
 // Golvet för strecken: under det är de ett tecken och inte ett mått.
 const BARS_MIN_H = 80;
 
@@ -320,6 +321,7 @@ function HomeScreen() {
           .maybeSingle();
         setUserName(data?.username ?? '');
         setAvatarUrl(data?.avatar_url?.startsWith('https://') ? data.avatar_url : null);
+        if (data) setCachedMyProfile(user.id, { username: data.username ?? '', avatar_url: data.avatar_url ?? null });
       };
       loadProfile();
     }, [user?.id])
@@ -1188,7 +1190,9 @@ function HomeScreen() {
         <Reanimated.View style={[styles.tagSheetWrap, tagSheetStyle]}>
           <PauseTagSheet
             durationSeconds={tag.durationSeconds}
+            sleepable={tag.sleepable}
             onClose={closeTag}
+            onSlept={() => { loadDaily().catch(() => {}); }}
             onHeight={h => setTagSheetH(prev => (Math.abs(prev - h) > 1 ? h : prev))}
             bottomPadding={Spacing.lg}
           />
@@ -1349,7 +1353,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     shadowRadius: 22,
     elevation: 12,
   },
-  pauseGlyph: { flexDirection: 'row', gap: 5 },
+  pauseGlyph: { flexDirection: 'row', gap: 6 },
   pauseGlyphBar: { width: 6, height: 18, borderRadius: 3, backgroundColor: Palette.onAccent },
   // *Keep holding* under PAUSE efter ett för kort tryck. Svävar under
   // knappen (komponenten placerar den) och tar ingen plats i räkningen.

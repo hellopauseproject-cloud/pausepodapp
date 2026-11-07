@@ -14,6 +14,7 @@ import { roomShell, ScreenBackground } from '../components/screen-background';
 import { track } from '../lib/analytics';
 import { supabase } from '../lib/supabase';
 import { isUsernameTakenError, USERNAME_TAKEN_MESSAGE } from '../lib/username';
+import { getCachedMyProfile, setCachedMyProfile } from '../lib/myProfile';
 import { saveProfile } from './userProfile';
 
 /**
@@ -38,16 +39,24 @@ function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { signOut, user } = useAuth();
   const navigation = useNavigation();
-  const [name, setName] = useState('');
-  const [photo, setPhoto] = useState<string | null>(null);
+  // Startar i det Hem redan hämtat (lib/myProfile.ts), så att namn och foto
+  // står där direkt; raden läses ändå om nedan.
+  const seed = user?.id ? getCachedMyProfile(user.id) : null;
+  const seedPhoto = seed?.avatar_url?.startsWith('https://') ? seed.avatar_url : null;
+  const [name, setName] = useState(seed?.username ?? '');
+  const [photo, setPhoto] = useState<string | null>(seedPhoto);
   const [saved, setSaved] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [unsavedAction, setUnsavedAction] = useState<any>(null);
 
-  const originalName = useRef('');
-  const originalPhoto = useRef<string | null>(null);
+  const originalName = useRef(seed?.username ?? '');
+  const originalPhoto = useRef<string | null>(seedPhoto);
+  // Har användaren hunnit börja skriva innan omläsningen landat skrivs fältet
+  // inte över.
+  const editedRef = useRef(false);
+  editedRef.current = hasChanges;
 
   // Primär källa: Supabase — re-fetchar när user.id ändras (logout/login som annan)
   useEffect(() => {
@@ -66,9 +75,9 @@ function ProfileScreen() {
         .eq('id', user.id)
         .maybeSingle();
 
-      console.log('Fetched profile for user:', user.id, data);
-
       if (data) {
+        setCachedMyProfile(user.id, { username: data.username ?? '', avatar_url: data.avatar_url ?? null });
+        if (editedRef.current) return;
         const n = data.username ?? '';
         // Acceptera bara HTTPS-URLer — lokala sökvägar är enhetsspecifika och delas inte
         const p = data.avatar_url?.startsWith('https://') ? data.avatar_url : null;
@@ -160,6 +169,7 @@ function ProfileScreen() {
 
     // Lokal kopia för call/voice-skärmar (bakåtkompatibilitet)
     await saveProfile(name.trim() || 'Yourself', photo);
+    setCachedMyProfile(user.id, { username: name.trim() || 'Unknown', avatar_url: avatarUrl });
 
     originalName.current = name;
     originalPhoto.current = avatarUrl;

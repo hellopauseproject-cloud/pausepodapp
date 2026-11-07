@@ -1,4 +1,4 @@
-import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
+import { FontAwesome5 } from '@expo/vector-icons';
 import type { BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
 import { Tabs, usePathname } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -65,6 +65,20 @@ const TAB_TRANSITION: Pick<BottomTabNavigationOptions, 'sceneStyleInterpolator' 
     },
   }),
 };
+
+/**
+ * Pause-flikens ikon: pausens två streck ritade för hand, som appikonen —
+ * rundade, och glappet lika brett som ett streck. FontAwesomes `pause` hade
+ * kantiga streck och ett smalare glapp.
+ */
+function PauseTabIcon({ color }: { color: string }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 6 }}>
+      <View style={{ width: 6, height: 19, borderRadius: 3, backgroundColor: color }} />
+      <View style={{ width: 6, height: 19, borderRadius: 3, backgroundColor: color }} />
+    </View>
+  );
+}
 
 const badgeLabel = (n: number): string | undefined =>
   n <= 0 ? undefined : n > BADGE_MAX ? `${BADGE_MAX}+` : String(n);
@@ -275,7 +289,7 @@ export default function TabLayout() {
         options={{
           title: 'Pause',
           tabBarIcon: ({ color }) => (
-            <FontAwesome name="pause" size={20} color={color} />
+            <PauseTabIcon color={color} />
           ),
         }}
       />

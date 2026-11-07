@@ -1,6 +1,6 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { AppPalette, alpha, Radius, roomPalette } from '../constants/appTheme';
 import { useTheme } from '../contexts/ThemeContext';
@@ -27,9 +27,16 @@ type Props = {
   id: string;
   durationText: string;
   dateText: string;
+  /**
+   * En lådpaus som taggats som natt i efterhand: SLEEP går att trycka på och
+   * öppnar intentionerna under kortet, så att natten kan bli en paus igen
+   * (supabase/sleep_tag.sql). En natt som startades med SLEEP har ingen.
+   */
+  onPressTag?: () => void;
+  tagExpanded?: boolean;
 };
 
-export function SleepSessionCard({ id, durationText, dateText }: Props) {
+export function SleepSessionCard({ id, durationText, dateText, onPressTag, tagExpanded = false }: Props) {
   const { mode } = useTheme();
   const Night = roomPalette(mode, 'night');
   const styles = useMemo(() => makeStyles(Night), [Night]);
@@ -44,10 +51,25 @@ export function SleepSessionCard({ id, durationText, dateText }: Props) {
       </View>
 
       <View style={styles.tags}>
-        <View style={styles.sleepTag} accessibilityLabel="Sleep">
-          <FontAwesome name="moon-o" size={11} color={Night.hue} />
-          <Text style={styles.sleepTagText}>SLEEP</Text>
-        </View>
+        {onPressTag ? (
+          <TouchableOpacity
+            style={styles.sleepTag}
+            onPress={onPressTag}
+            hitSlop={8}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: tagExpanded }}
+            accessibilityLabel="Tag: sleep. Change tag."
+          >
+            <FontAwesome name="moon-o" size={11} color={Night.hue} />
+            <Text style={styles.sleepTagText}>SLEEP</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.sleepTag} accessibilityLabel="Sleep">
+            <FontAwesome name="moon-o" size={11} color={Night.hue} />
+            <Text style={styles.sleepTagText}>SLEEP</Text>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -76,5 +98,4 @@ const makeStyles = (Night: AppPalette) => StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 4,
     borderWidth: 1, borderColor: alpha(Night.hue, 0.35),
   },
-  sleepTagText: { fontSize: 12, fontWeight: '800', letterSpacing: 1.4, color: Night.hue },
-});
+  sleepTagText: { fontSize: 12, fontWeight: '800', letterSpacing: 1.4, color: Night.hue },});

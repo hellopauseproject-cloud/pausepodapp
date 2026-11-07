@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { alpha, AppPalette, Radius } from '../constants/appTheme';
-import { usePalette } from '../contexts/ThemeContext';
+import { FontAwesome } from '@expo/vector-icons';
+
+import { alpha, AppPalette, Radius, roomPalette } from '../constants/appTheme';
+import { usePalette, useTheme } from '../contexts/ThemeContext';
 import { type Category } from '../app/pauseLogger';
 
 /**
@@ -67,7 +69,7 @@ export function intentionTone(Palette: AppPalette, id: string): string {
 }
 
 export function PauseTagChips({
-  categories, selectedLabel, onPick, disabled, colorful = false,
+  categories, selectedLabel, onPick, disabled, colorful = false, onPickSleep, sleepOn = false,
 }: {
   categories: Category[];
   /** Den tagg pausen har nu, som etikett (`FOCUS`), eller null. */
@@ -75,6 +77,12 @@ export function PauseTagChips({
   onPick: (cat: Category) => void;
   disabled?: boolean;
   colorful?: boolean;
+  /**
+   * *Sleep* sist i raden: pausen blir en natt (lib/pauseTags.ts). Utan
+   * pilen syns den inte — bara en ensam lådpaus kan bli en natt.
+   */
+  onPickSleep?: () => void;
+  sleepOn?: boolean;
 }) {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
@@ -91,7 +99,40 @@ export function PauseTagChips({
           styles={styles}
         />
       ))}
+      {onPickSleep && (
+        <SleepChip on={sleepOn} big={colorful} onPick={onPickSleep} disabled={disabled} styles={styles} />
+      )}
     </View>
+  );
+}
+
+/**
+ * *Sleep* är inte en intention utan ett annat slags paus, och ser därför ut
+ * som natten: nattrummets marinblå med månen, i båda lägena — samma himmel
+ * som nattens kort i statistiken (sleep-session-card.tsx).
+ */
+function SleepChip({ on, big, onPick, disabled, styles }: {
+  on: boolean; big: boolean; onPick: () => void; disabled?: boolean;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const { mode } = useTheme();
+  const Night = roomPalette(mode, 'night');
+  return (
+    <TouchableOpacity
+      style={[
+        styles.chip, big && styles.chipBig,
+        { backgroundColor: Night.bg, borderColor: on ? Night.hue : alpha(Night.hue, 0.45) },
+      ]}
+      onPress={onPick}
+      disabled={disabled}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityState={{ selected: on, disabled: !!disabled }}
+      accessibilityLabel="Tag as sleep. The pause becomes a night."
+    >
+      <FontAwesome name="moon-o" size={big ? 16 : 14} color={Night.hue} />
+      <Text style={[styles.label, { color: Night.hue }]}>SLEEP</Text>
+    </TouchableOpacity>
   );
 }
 

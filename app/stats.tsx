@@ -24,7 +24,7 @@ import { GlobeGrid } from '../components/globe-grid';
 import { PodBoxIcon } from '../components/pod-box-icon';
 import { fetchMyGlobalPauseWindows } from '../lib/globalPause';
 import { Cheerer, getCheersFor } from '../lib/pauseCheers';
-import { setPauseIntention } from '../lib/pauseTags';
+import { setPauseIntention, tagPauseAsSleep, untagSleep } from '../lib/pauseTags';
 import { getNightProgress, getSleepNights } from '../lib/sleep';
 import type { SleepNight } from '../types/database';
 import { Category, DEFAULT_CATEGORIES, getSelectedCategories } from './pauseLogger';
@@ -122,6 +122,8 @@ type SessionItem = {
   endedAt: string | null;
   wakeCount: number;
   awakeSecs: number;
+  /** En paus som taggats som natt i efterhand — bara den går att ångra. */
+  taggedAsSleep: boolean;
 };
 
 // Modul-nivå — överlever remount inom samma app-session
@@ -264,7 +266,7 @@ function StatsScreen() {
       getNightProgress().then(p => setCurrentNight(p?.night_of ?? null));
       const { data: all } = await supabase
         .from('pause_sessions')
-        .select('id, duration_seconds, intention, started_at, ended_at, shared_session_id, with_pod, kind, wake_count, awake_seconds')
+        .select('id, duration_seconds, intention, started_at, ended_at, shared_session_id, with_pod, kind, wake_count, awake_seconds, tagged_as_sleep')
         .eq('user_id', user.id)
         .not('ended_at', 'is', null)
         .order('started_at', { ascending: false });
@@ -347,6 +349,7 @@ function StatsScreen() {
         endedAt: r.ended_at ?? null,
         wakeCount: r.wake_count ?? 0,
         awakeSecs: r.awake_seconds ?? 0,
+        taggedAsSleep: r.tagged_as_sleep ?? false,
       })));
       setLoaded(true);
 
@@ -412,6 +415,25 @@ function StatsScreen() {
     setSessions(prev => prev.map(x => (x.id === s.id ? { ...x, intention: label } : x)));
     setEditingTagId(null);
     track(label ? 'pause_tagged' : 'pause_tag_removed', { where: 'stats' });
+  };
+
+  // *Sleep* bland taggarna gör en lådpaus till en natt (supabase/sleep_tag.sql),
+  // och kortet byts mot nattens. På en taggad natt öppnar SLEEP samma chips,
+  // och en intention gör den till en paus igen. `label` null = till natt.
+  const setSleep = async (s: SessionItem, label: string | null) => {
+    if (!user?.id || savingTagId) return;
+    const toSleep = label === null;
+    setSavingTagId(s.id);
+    const ok = toSleep ? await tagPauseAsSleep(s.id) : await untagSleep(s.id, label);
+    setSavingTagId(null);
+    if (!ok) { Alert.alert('Could not save tag', 'Check your connection and try again.'); return; }
+    setSessions(prev => prev.map(x => (x.id === s.id
+      ? { ...x, kind: toSleep ? 'sleep' : 'pause', intention: label, taggedAsSleep: toSleep, globalPause: false }
+      : x)));
+    setEditingTagId(null);
+    setFlippedId(null);
+    getSleepNights(30).then(setNights);
+    track(toSleep ? 'pause_tagged_as_sleep' : 'sleep_untagged', { where: 'stats' });
   };
 
   // Diagrammet räknas fram ur `sessions`, så det uppdaterar sig självt när
@@ -589,11 +611,31 @@ function StatsScreen() {
               {/* En natt: natthimmel och SLEEP i stället för taggar. Samma
                   svep för att radera som en paus. */}
               {s.kind === 'sleep' ? (
-                <SleepSessionCard
-                  id={s.id}
-                  durationText={fmtDur(s.durationSecs)}
-                  dateText={s.startedAt ? fmtDate(s.startedAt) : '—'}
-                />
+                <View>
+                  <SleepSessionCard
+                    id={s.id}
+                    durationText={fmtDur(s.durationSecs)}
+                    dateText={s.startedAt ? fmtDate(s.startedAt) : '—'}
+                    onPressTag={s.taggedAsSleep
+                      ? () => setEditingTagId(editingTagId === s.id ? null : s.id)
+                      : undefined}
+                    tagExpanded={editingTagId === s.id}
+                  />
+                  {/* Under kortet och inte i det: chippens toner är gjorda för
+                      rummets botten, inte för natthimlen. SLEEP igen stänger. */}
+                  {editingTagId === s.id && (
+                    <View style={styles.sleepTagEditor}>
+                      <PauseTagChips
+                        categories={tagCats}
+                        onPick={c => setSleep(s, c.label)}
+                        disabled={savingTagId === s.id}
+                        colorful
+                        onPickSleep={() => setEditingTagId(null)}
+                        sleepOn
+                      />
+                    </View>
+                  )}
+                </View>
               ) : (
               (() => {
               // Kortet tar färg av sin intention, samma ton som chippet på
@@ -694,6 +736,7 @@ function StatsScreen() {
                       onPick={c => saveTag(s, c.label)}
                       disabled={savingTagId === s.id}
                       colorful
+                      onPickSleep={isPod && !s.sharedSessionId ? () => setSleep(s, null) : undefined}
                     />
                     {!!s.intention && (
                       <TouchableOpacity
@@ -879,6 +922,8 @@ const makeStyles = (Palette: AppPalette, Night: AppPalette) => StyleSheet.create
     gap: 10, paddingTop: 12, marginTop: 2,
     borderTopWidth: 1, borderTopColor: Palette.surfaceBorder,
   },
+  // Nattkortet har sin egen marginal under sig; chippen står i den.
+  sleepTagEditor: { paddingTop: 2, paddingBottom: 14 },
   tagRemove: { alignSelf: 'flex-start', paddingVertical: 4 },
   tagRemoveText: { fontSize: 13, fontWeight: '600', color: Palette.textSecondary },
 

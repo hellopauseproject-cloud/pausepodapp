@@ -86,12 +86,15 @@ function PauseSummaryScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const { user } = useAuth();
-  const { duration, category, sharedSessionId } = useLocalSearchParams<{
+  const { duration, category, sharedSessionId, withPod } = useLocalSearchParams<{
     duration: string;
     category: string;
     sharedWithName: string;
     sharedSessionId: string;
+    withPod: string;
   }>();
+  // Bara en ensam lådpaus kan bli en natt i efterhand (lib/pauseTags.ts).
+  const sleepable = withPod === '1' && !sharedSessionId;
 
   const seconds = parseInt(duration ?? '0');
   const bellPlayer = useAudioPlayer(require('../assets/images/Bell.mp3'));
@@ -114,7 +117,7 @@ function PauseSummaryScreen() {
     if (handOff) {
       if (handedOffRef.current) return;
       handedOffRef.current = true;
-      setPendingPauseTag(seconds, !!category);
+      setPendingPauseTag(seconds, !!category, true, sleepable);
       router.replace('/(tabs)');
       return;
     }

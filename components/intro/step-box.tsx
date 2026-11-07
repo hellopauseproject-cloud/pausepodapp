@@ -513,7 +513,7 @@ const local = StyleSheet.create({
   // en liten display läser som ett streck, inte som en paus.
   pauseGlyph: {
     flexDirection: 'row',
-    gap: 9,
+    gap: 10,
   },
   pauseBar: {
     width: 10,

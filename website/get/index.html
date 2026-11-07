@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Get PausePod</title>
+<meta name="description" content="Pausing is better together. Get the PausePod app.">
+<meta property="og:title" content="Pause with me on PausePod">
+<meta property="og:description" content="Take pauses together and send each other support.">
+<meta name="theme-color" content="#0A1330">
+<link rel="icon" href="/favicon.ico">
+<script>
+  // ── Fill these in when the apps are live. Empty = "coming soon". ──────────
+  // Nothing in the app needs to change: the app always shares /get.
+  var APP_STORE_URL = '';   // e.g. https://apps.apple.com/app/id0000000000
+  var PLAY_STORE_URL = '';  // e.g. https://play.google.com/store/apps/details?id=com.pausepod.app
+
+  // Send the phone straight to its own store. The sender's phone can't decide
+  // this — a friend on Android needs Play even if the invite came from an iPhone.
+  (function () {
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isAndroid = /Android/i.test(ua);
+    var target = isIOS ? APP_STORE_URL : isAndroid ? PLAY_STORE_URL : '';
+    if (target && !/[?&]stay\b/.test(location.search)) location.replace(target);
+  })();
+</script>
+<style>
+  :root {
+    --navy-950: #060C1D; --navy-900: #0A1330; --navy-800: #111C3F; --navy-700: #1C2B58;
+    --ice-50: #EEF3FF; --ice-300: #B3C1DE; --sky-300: #9CCBFF; --honey: #F0B978;
+    --pause: #8CC4FF; --circle: #7FE0B0; --friends: #FFB77D;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { min-height: 100%; }
+  body {
+    background: radial-gradient(120% 80% at 50% 0%, var(--navy-800) 0%, var(--navy-900) 55%, var(--navy-950) 100%);
+    background-color: var(--navy-900);
+    color: var(--ice-50);
+    font: 400 17px/1.55 Arial, Helvetica, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 48px 16px;
+  }
+  main { width: 100%; max-width: 420px; text-align: center; }
+  .mark { display: inline-flex; gap: 10px; margin-bottom: 28px; }
+  .mark span {
+    width: 16px; height: 56px; border-radius: 99px; background: var(--sky-300);
+    box-shadow: 0 0 28px rgba(156, 203, 255, .45);
+    animation: breathe 6s cubic-bezier(.2,.8,.2,1) infinite;
+  }
+  .mark span:last-child { animation-delay: .4s; }
+  @keyframes breathe { 0%, 100% { opacity: .75; transform: scaleY(.94); } 50% { opacity: 1; transform: scaleY(1); } }
+  .kicker {
+    font: 900 .76rem/1 'Arial Black', Arial, sans-serif; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--sky-300); margin-bottom: 14px;
+  }
+  h1 {
+    font: 900 clamp(1.9rem, 8vw, 2.5rem)/1.08 'Arial Black', Arial, sans-serif;
+    text-transform: uppercase; letter-spacing: .01em; margin-bottom: 16px;
+  }
+  .lead { color: var(--ice-300); margin-bottom: 32px; }
+  .lead strong { color: var(--ice-50); }
+  .ribbon { height: 4px; width: 120px; margin: 0 auto 32px; border-radius: 99px;
+    background: linear-gradient(90deg, var(--pause), var(--circle), var(--friends)); }
+  .actions { display: grid; gap: 12px; }
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    min-height: 54px; padding: 0 22px; border-radius: 99px; text-decoration: none;
+    font: 900 .95rem/1 'Arial Black', Arial, sans-serif; letter-spacing: .06em; text-transform: uppercase;
+    transition: background-color .3s cubic-bezier(.2,.8,.2,1), color .3s, border-color .3s;
+  }
+  .btn-primary { background: var(--sky-300); color: var(--navy-900); }
+  .btn-primary:hover { background: var(--honey); }
+  .btn-quiet { border: 2px solid var(--navy-700); color: var(--ice-50); }
+  .btn-quiet:hover { border-color: var(--sky-300); }
+  .btn svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
+  .status {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; margin-bottom: 20px;
+    border: 1px solid var(--navy-700); border-radius: 99px;
+    font: 900 .7rem/1 'Arial Black', Arial, sans-serif; letter-spacing: .2em; text-transform: uppercase; color: var(--ice-300);
+  }
+  .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--honey); }
+  .foot { margin-top: 36px; font-size: .85rem; color: var(--ice-300); }
+  .foot a { color: var(--ice-300); }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { .mark span { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="mark" aria-hidden="true"><span></span><span></span></div>
+  <p class="kicker" id="kicker">PausePod</p>
+  <h1>Pausing is better together.</h1>
+  <p class="lead" id="lead">Take pauses with friends, and send each other support.</p>
+  <div class="ribbon" aria-hidden="true"></div>
+
+  <!-- Live: shown when at least one store link is set (desktop, or ?stay). -->
+  <div class="actions" id="stores" hidden>
+    <a class="btn btn-primary" id="ios" href="#" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.37 12.6c.03 2.77 2.43 3.69 2.46 3.7-.02.06-.38 1.31-1.27 2.6-.77 1.12-1.56 2.23-2.82 2.25-1.23.02-1.63-.73-3.04-.73-1.41 0-1.85.71-3.01.75-1.21.05-2.14-1.21-2.91-2.32-1.59-2.29-2.8-6.47-1.17-9.29.81-1.4 2.25-2.29 3.82-2.31 1.19-.02 2.32.8 3.04.8.73 0 2.1-.99 3.54-.85.6.03 2.29.24 3.38 1.83-.09.05-2.02 1.18-2 3.53zM14.04 3.85c.65-.79 1.08-1.88.96-2.97-.93.04-2.06.62-2.73 1.4-.6.69-1.12 1.8-.98 2.87 1.04.08 2.1-.53 2.75-1.3z"/></svg>
+      App Store
+    </a>
+    <a class="btn btn-quiet" id="android" href="#" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 1.8 13.4 11.6 3.6 21.4c-.36-.2-.6-.6-.6-1.07V2.87c0-.47.24-.87.6-1.07zm10.86 10.86 2.5 2.5-11.3 6.43 8.8-8.93zm3.6-3.6 2.94 1.68c.82.47.82 1.65 0 2.12l-2.94 1.68-2.72-2.74 2.72-2.74zM5.66 2.41l11.3 6.43-2.5 2.5-8.8-8.93z"/></svg>
+      Google Play
+    </a>
+  </div>
+
+  <!-- Before launch: no store links yet. -->
+  <div id="soon">
+    <p class="status">Coming soon</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="/#waitlist">Join the waitlist</a>
+    </div>
+  </div>
+
+  <p class="foot"><a href="/">joinpausepod.com</a></p>
+</main>
+<script>
+  (function () {
+    // ?from=<username> — the app adds this, so the friend knows who to look for.
+    var from = new URLSearchParams(location.search).get('from');
+    if (from) {
+      from = from.trim().slice(0, 40);
+      document.getElementById('kicker').textContent = from + ' invited you';
+      var lead = document.getElementById('lead');
+      lead.textContent = 'Get the app and add ';
+      var s = document.createElement('strong');
+      s.textContent = from;
+      lead.appendChild(s);
+      lead.appendChild(document.createTextNode(' as a friend.'));
+    }
+    // A phone whose own store isn't live yet sees "coming soon", not the other store.
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isAndroid = /Android/i.test(ua);
+    var ownMissing = (isIOS && !APP_STORE_URL) || (isAndroid && !PLAY_STORE_URL);
+    if ((APP_STORE_URL || PLAY_STORE_URL) && !ownMissing) {
+      document.getElementById('soon').hidden = true;
+      document.getElementById('stores').hidden = false;
+      if (APP_STORE_URL) { var i = document.getElementById('ios'); i.href = APP_STORE_URL; i.hidden = false; }
+      if (PLAY_STORE_URL) { var a = document.getElementById('android'); a.href = PLAY_STORE_URL; a.hidden = false; }
+    }
+  })();
+</script>
+</body>
+</html>

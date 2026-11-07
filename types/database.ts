@@ -108,6 +108,8 @@ export type PauseSession = {
   /** Bara sömnrader. */
   wake_count: number | null;
   awake_seconds: number | null;
+  /** En paus taggad som natt i efterhand (supabase/sleep_tag.sql). */
+  tagged_as_sleep?: boolean;
 };
 
 export type MessageType = 'voice' | 'video' | 'text';
