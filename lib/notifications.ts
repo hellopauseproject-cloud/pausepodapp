@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { track } from './analytics';
 import { supabase } from './supabase';
 
 /**
@@ -416,16 +417,32 @@ export async function syncDailyReminder(): Promise<void> {
         content: {
           title: TITLE,
           body: `${formatRemaining(remaining)} left of today's goal.`,
-          ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL_ID } : null),
         },
+        // Kanalen hör till triggern sedan expo-notifications 0.29; i
+        // `content` läses den inte, och notisen hamnade i reservkanalen.
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: fireAt,
+          ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL_ID } : null),
         },
       });
     }
   } catch {
     // Tyst med flit. Se doc-kommentaren ovan.
+  }
+}
+
+/**
+ * Om appens notiser är avstängda. Frågar aldrig — läser bara. Används av
+ * Global Pause-rummet, som säger till när en anmälan inte kan få sin
+ * påminnelse: har man en gång sagt nej kan appen inte fråga igen, och utan
+ * raden trodde man att man skulle bli påmind.
+ */
+export async function notificationsBlocked(): Promise<boolean> {
+  try {
+    return !(await Notifications.getPermissionsAsync()).granted;
+  } catch {
+    return false;
   }
 }
 
@@ -448,10 +465,12 @@ export async function scheduleGlobalPauseReminder(startsAt: Date): Promise<void>
     await cancelGlobalPauseReminder();
     await requestPermission();
     const permission = await Notifications.getPermissionsAsync();
-    if (!permission.granted) return;
+    // Utfallet loggas, för en påminnelse som uteblev går annars inte att
+    // skilja från en som aldrig lades ut.
+    if (!permission.granted) { track('global_pause_reminder', { outcome: 'no_permission' }); return; }
 
     const fireAt = new Date(startsAt.getTime() - GLOBAL_PAUSE_REMINDER_LEAD_MS);
-    if (fireAt.getTime() <= Date.now()) return;
+    if (fireAt.getTime() <= Date.now()) { track('global_pause_reminder', { outcome: 'too_late' }); return; }
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync(GLOBAL_PAUSE_CHANNEL_ID, {
@@ -466,15 +485,17 @@ export async function scheduleGlobalPauseReminder(startsAt: Date): Promise<void>
         title: `${GLOBAL_PAUSE_NAME} in 10 minutes`,
         body: 'The room is open.',
         data: { type: GLOBAL_PAUSE_TYPE },
-        ...(Platform.OS === 'android' ? { channelId: GLOBAL_PAUSE_CHANNEL_ID } : null),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: fireAt,
+        ...(Platform.OS === 'android' ? { channelId: GLOBAL_PAUSE_CHANNEL_ID } : null),
       },
     });
-  } catch {
-    // Tyst med flit, se ovan.
+    track('global_pause_reminder', { outcome: 'scheduled', fire_at: fireAt.toISOString() });
+  } catch (e) {
+    // Tyst för användaren, se ovan.
+    track('global_pause_reminder', { outcome: 'error', message: String(e).slice(0, 120) });
   }
 }
 

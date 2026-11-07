@@ -317,7 +317,15 @@ En gång om dagen pausar alla samtidigt. Schema och regler i
 - **Inga bottar, och siffrorna är alltid de riktiga.**
 - **Påminnelsen är lokal**, 10 minuter före, och läggs ut av *I'll join*. Den
   är appens sjunde notis, och den kan inte växa av sig själv: man väljer den
-  själv, en gång per global paus. Egen Android-kanal.
+  själv, en gång per global paus. Egen Android-kanal. **Är appens notiser
+  avstängda säger rummet det** under *You're in* (*Notifications are off ·
+  Turn on*, öppnar telefonens inställningar), för har man en gång sagt nej kan
+  appen inte fråga igen, och anmälan stod annars utan påminnelse utan att det
+  syntes. Det är inte en klagan i dagspåminnelsens mening: man har just bett om
+  att bli påmind. Slås notiserna på läggs påminnelsen ut när appen kommer
+  tillbaka. Utfallet loggas som `global_pause_reminder` (`scheduled`,
+  `no_permission`, `too_late`, `error`). Android-kanalen sätts på **triggern**,
+  inte i `content` — den här versionen av expo-notifications läser den bara där.
 - **Efter en paus i en Global Pause** visar sammanfattningen ([components/global-pause-summary.tsx](components/global-pause-summary.tsx)) jordklotet, pausens tid, hur många man pausade med och tiden tillsammans, och under det nästa Global Pause med *I'll join* (ett tryck byter knappen mot *You're in*, tiden står kvar), i nattrummet, och stannar tills *Back to start*. Har man sett den visar rummet nästa i stället för DONE (`wasSummarized`). Statistiksidan har rubriken *YOUR PAUSES* och Friends *FRIENDS*, samma display (26 pt, 900). På pausens kort står jordklotet nere i högra hörnet, centrerat under lådan. Veckans sammanfattning (my-wrapped) har ett ribbonkort med antalet Global Pauses de senaste sju dagarna ([components/global-pause-week-card.tsx](components/global-pause-week-card.tsx)), bara när det är minst en. `get_my_last_global_result()` avgör, inom tio minuter efter att ens rad slutat (eller medan den ännu går, eftersom `finished` kan komma efter), och den visas en gång per Global Pause. En vanlig ensam paus byter som förut direkt till Hem.
 - **I statistiken** står samma jordklot under lådan på en paus som låg i en Global Pause. Kortet matchar på tid mot `get_my_global_pauses()` (en minuts marginal), utan någon kolumn på `pause_sessions`.
 - **Inget här får stoppa en paus.** `reportGlobalPause` väntas aldrig in, och

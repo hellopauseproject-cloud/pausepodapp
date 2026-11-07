@@ -3,7 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, AppState, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import Animated, {
   cancelAnimation, Easing, FadeIn, FadeOut, useAnimatedStyle, useReducedMotion, useSharedValue,
@@ -26,7 +26,7 @@ import {
   DemoPhase, fetchGlobalPause, formatCountdown, formatGlobalPauseWhen, GLOBAL_PAUSE_DEMO, GlobalPause,
   GlobalPausePerson, joinGlobalPause, setDemoPhase, wasSummarized,
 } from '../lib/globalPause';
-import { GLOBAL_PAUSE_NAME } from '../lib/notifications';
+import { GLOBAL_PAUSE_NAME, notificationsBlocked, scheduleGlobalPauseReminder } from '../lib/notifications';
 import { HOLD_TO_START_MS, startPhonePause } from '../lib/pauseFlow';
 import { Category, DEFAULT_CATEGORIES, getSelectedCategories } from './pauseLogger';
 
@@ -197,6 +197,27 @@ function GlobalPauseScreen() {
   useEffect(() => {
     getSelectedCategories().then(c => { if (c.length > 0) setCategories(c); }).catch(() => {});
   }, []);
+
+  // Avstängda notiser: anmälan står sig, men påminnelsen kan inte läggas ut.
+  // Läses vid fokus och när appen kommer tillbaka — tillbaka från
+  // inställningarna fyrar ingen fokushändelse. Har notiserna slagits på läggs
+  // påminnelsen ut där och då, annars hade raden försvunnit utan att något
+  // hänt.
+  const [notifsOff, setNotifsOff] = useState(false);
+  const signedUpFor = pause?.me ? pause.starts_at : null;
+  useEffect(() => {
+    if (!signedUpFor) return;
+    let wasOff = false;
+    const check = async () => {
+      const off = await notificationsBlocked();
+      setNotifsOff(off);
+      if (wasOff && !off) scheduleGlobalPauseReminder(new Date(signedUpFor));
+      wasOff = off;
+    };
+    check();
+    const sub = AppState.addEventListener('change', state => { if (state === 'active') check(); });
+    return () => sub.remove();
+  }, [signedUpFor]);
 
   const secondsOf = (p: GlobalPausePerson) => {
     if (!p.running || !pause) return p.seconds;
@@ -386,7 +407,22 @@ function GlobalPauseScreen() {
               </HoldToStartButton>
               </View>
             ) : (
-              <Text style={s.inLine}>You&apos;re in</Text>
+              <>
+                <Text style={s.inLine}>You&apos;re in</Text>
+                {notifsOff && (
+                  <TouchableOpacity
+                    onPress={() => Linking.openSettings().catch(() => {})}
+                    hitSlop={8}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel="Notifications are off, so there is no reminder. Turn them on in settings."
+                  >
+                    <Text style={s.notifsOff}>
+                      Notifications are off · <Text style={s.notifsOn}>Turn on</Text>
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             )}
           </>
         )}
@@ -558,6 +594,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   glyphBar: { width: 6, height: 18, borderRadius: 3, backgroundColor: Palette.onAccent },
   inLine: { fontSize: 17, color: Palette.textPrimary, textAlign: 'center' },
   quiet: { fontSize: 14, lineHeight: 20, color: Palette.textSecondary, textAlign: 'center' },
+  notifsOff: { fontSize: 13, lineHeight: 18, color: Palette.textTertiary, textAlign: 'center' },
+  notifsOn: { color: Palette.hue, fontWeight: '700' },
   links: { flexDirection: 'row', justifyContent: 'center', gap: 32 },
   link: { fontSize: 14, color: Palette.textSecondary },
   error: { fontSize: 14, color: Palette.danger, textAlign: 'center' },
