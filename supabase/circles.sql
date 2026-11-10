@@ -1202,9 +1202,13 @@ begin
     -- flödet heller.
     get diagnostics v_rows = row_count;
     if v_rows > 0 then
+      -- `session_id` så att flödet kan visa en tagg som sätts efteråt
+      -- (`get_circle_activity_tags` i circle_intentions.sql). `category` är
+      -- intentionen som valdes före pausen, om någon.
       insert into circle_activity (circle_id, actor_id, type, metadata)
         values (v_circle_id, auth.uid(), 'pause_completed',
-                jsonb_build_object('duration_seconds', v_counted, 'category', p_category));
+                jsonb_build_object('duration_seconds', v_counted, 'category', p_category,
+                                   'session_id', p_session_id));
 
       perform evaluate_circle_goals(v_circle_id);
     end if;

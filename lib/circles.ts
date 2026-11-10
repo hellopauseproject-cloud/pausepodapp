@@ -19,24 +19,29 @@ const CATEGORY_VERB: Record<string, string> = {
   create: 'create',
   music: 'play music',
   nature: 'be in nature',
+  // En egen intention lämnas aldrig ut med namn i en krets
+  // (supabase/circle_intentions.sql) — den står som `other`.
+  other: 'do their own thing',
 };
 
 /**
  * Stegen i målratten (och i `− +` på Hem). Talet är ett DAGSmål, så spannet
- * är 30 min till 12 h — samma tak som `set_daily_goal` håller i
- * circles.sql (`p_seconds > 12 * 3600` avvisas). Höjs taket här måste det
- * höjas där också, annars erbjuder ratten ett steg servern säger nej till.
+ * är 10 min till 12 h — inom `set_daily_goal`s gränser i circles.sql (minst
+ * 5 min, högst 12 h). Ändras ett tak här måste det stämma där också, annars
+ * erbjuder ratten ett steg servern säger nej till.
  *
- * **Hela timmar, med en halvtimme som första steg.** Halvtimmessteg hela
- * vägen upp gav tolv detenter där hälften bara var `2h 30min`-varianter av
- * sina grannar — ratten blev stökig att läsa utan att bli mer användbar. Den
- * enda halvtimmen som bär något är den första, för 30 min och 1 h är verkligt
- * olika löften; skillnaden mellan 4 h och 4 h 30 min är det inte.
+ * **Hela timmar, med minuter bara i början.** Halvtimmessteg hela vägen upp
+ * gav tolv detenter där hälften bara var `2h 30min`-varianter av sina
+ * grannar — ratten blev stökig att läsa utan att bli mer användbar. Under en
+ * timme är stegen verkligt olika löften (10, 20, 30, 45 min); skillnaden
+ * mellan 4 h och 4 h 30 min är det inte.
  *
  * Veckans ribba räknas sedan som detta gånger sju.
  */
 export const GOAL_OPTIONS: number[] = [
-  30 * 60,
+  // Från 10 min (november 2026, på begäran): en liten början är bättre än
+  // ingen. `set_daily_goal` tar emot ner till 5 min, så ingen SQL behövdes.
+  10 * 60, 20 * 60, 30 * 60, 45 * 60,
   ...Array.from({ length: 12 }, (_, i) => (i + 1) * 3600),
 ];
 
@@ -251,10 +256,23 @@ export const DEFAULT_CIRCLE_SETTINGS: CircleSettings = {
   rewards_enabled: false, count_from: null, count_to: null, count_workdays: false, pending: null,
 };
 
-/** Fönstret i ord: "All day, every day", "8–17, Mon–Fri". */
-export function formatCountWindow(w: CountWindow): string {
-  const hours = w.count_from === null || w.count_to === null ? 'All day' : `${w.count_from}–${w.count_to}`;
-  return `${hours}, ${w.count_workdays ? 'Mon–Fri' : 'every day'}`;
+/**
+ * Fönstret med samma etikett varje gång: "Time window: any time",
+ * "Time window: 8–17, Mon–Fri". Samma ord som inställningsformuläret
+ * (*this time window*), så att raden och det den öppnar säger samma sak.
+ * *Counts all day, every day* sa inte vad som räknades, och *Every pause
+ * counts* läste som en slogan.
+ */
+export function formatCountRule(w: CountWindow, midSentence = false): string {
+  // Mitt i en mening ("From next week: time window …") utan kolon.
+  return midSentence ? `time window ${formatCountValue(w)}` : `Time window: ${formatCountValue(w)}`;
+}
+
+/** Bara värdet: "any time", "8–17, Mon–Fri". */
+export function formatCountValue(w: CountWindow): string {
+  const hours = w.count_from === null || w.count_to === null ? null : `${w.count_from}–${w.count_to}`;
+  const days = w.count_workdays ? 'Mon–Fri' : null;
+  return !hours && !days ? 'any time' : [hours, days].filter(Boolean).join(', ');
 }
 
 /** Om fönstret är något annat än dygnet runt alla dagar. */

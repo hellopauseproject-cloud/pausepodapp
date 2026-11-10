@@ -1,9 +1,11 @@
 import { Entypo, FontAwesome5 } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useEffect, useMemo, useState } from 'react';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { Category, DEFAULT_CATEGORIES, saveSelectedCategories } from '../app/pauseLogger';
+import {
+  Category, DEFAULT_CATEGORIES, getCustomCategories, getSelectedCategoryIds,
+  saveCustomCategories, saveSelectedCategories,
+} from '../app/pauseLogger';
 import { AppPalette, Radius, Spacing } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { track } from '../lib/analytics';
@@ -19,12 +21,9 @@ import { lastEmoji } from '../lib/emojiInput';
  * fråga om osparade ändringar; ett val man ser slå igenom ska ingen behöva
  * bekräfta, och profilens egen Spara gäller namn och foto.
  *
- * Samma filer som förut: `selectedCategories.json` (via `saveSelectedCategories`)
- * och `customCategories.json`.
+ * Läses och skrivs genom app/pauseLogger.ts, som håller filerna på telefonen
+ * och raden i `user_intentions` i takt.
  */
-
-const CATEGORIES_PATH = FileSystem.documentDirectory + 'selectedCategories.json';
-const CUSTOM_CATEGORIES_PATH = FileSystem.documentDirectory + 'customCategories.json';
 
 export function IntentionSettings() {
   const Palette = usePalette();
@@ -36,8 +35,9 @@ export function IntentionSettings() {
 
   useEffect(() => {
     (async () => {
-      try { setSelected(JSON.parse(await FileSystem.readAsStringAsync(CATEGORIES_PATH))); } catch {}
-      try { setCustom(JSON.parse(await FileSystem.readAsStringAsync(CUSTOM_CATEGORIES_PATH))); } catch {}
+      const ids = await getSelectedCategoryIds();
+      if (ids) setSelected(ids);
+      setCustom(await getCustomCategories());
     })();
   }, []);
 
@@ -64,7 +64,7 @@ export function IntentionSettings() {
     setSelected(nextSelected);
     setNewEmoji('');
     setNewLabel('');
-    await FileSystem.writeAsStringAsync(CUSTOM_CATEGORIES_PATH, JSON.stringify(nextCustom));
+    await saveCustomCategories(nextCustom);
     persist(nextSelected, nextCustom);
   };
 
@@ -73,7 +73,7 @@ export function IntentionSettings() {
     const nextSelected = selected.filter(c => c !== id);
     setCustom(nextCustom);
     setSelected(nextSelected);
-    await FileSystem.writeAsStringAsync(CUSTOM_CATEGORIES_PATH, JSON.stringify(nextCustom));
+    await saveCustomCategories(nextCustom);
     persist(nextSelected, nextCustom);
   };
 

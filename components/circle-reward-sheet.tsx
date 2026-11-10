@@ -59,7 +59,7 @@ export function CircleRewardSheet({ visible, circleId, reward, meId, onClose, on
   // Kortet visar en sak i taget: belöningen, reglerna eller historiken.
   const [view, setView] = useState<'main' | 'help' | 'history'>('main');
 
-  // Tangentbordets höjd, mätt för hand — samma lösning som todo-sheet.tsx och
+  // Tangentbordets höjd, mätt för hand — samma lösning som
   // circle-chat.tsx. KeyboardAvoidingView gjorde ingenting på Android
   // (`edgeToEdgeEnabled` stänger av `adjustResize`), så skrivraden låg under
   // tangentbordet. Lägg inte tillbaka en KAV ovanpå: då räknas det två gånger.

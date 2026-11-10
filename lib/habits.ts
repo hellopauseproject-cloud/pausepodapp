@@ -7,11 +7,14 @@ import { supabase } from './supabase';
  * golvet på fem minuter, bara pauser — bor i supabase/habits.sql. Klienten
  * räknar ingenting själv.
  *
- * De sätts i samma ruta som dagsmålet på Hem, och sparas med samma knapp.
+ * **Vilande sedan november 2026:** ingen yta i appen läser eller sätter dem
+ * längre. Hems hörn visar i stället veckans taggar utan mål
+ * (lib/weekTally.ts). Filen, components/habit-goals-editor.tsx och
+ * supabase/habits.sql står kvar så att vanemålen går att ta tillbaka.
  */
 
 /** Speglar taket i `set_habit_goals` — de två måste stämma. */
-export const MAX_HABITS = 2;
+export const MAX_HABITS = 3;
 /** Förvalet när en vana läggs till: tre dagar är en vana men inget krav. */
 export const DEFAULT_HABIT_TIMES = 3;
 

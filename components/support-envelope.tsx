@@ -23,8 +23,8 @@ export type SupportKind = 'text' | 'voice' | 'video' | 'photo';
  * palettstyrt, och samma i båda lägena. Ett krämvitt kuvert utan kant smälte
  * in i Friends-rummets varma botten, och ett blått prövades och föll på
  * begäran. Det som lyfter det är en tunn terrakottakant, skuggan och en
- * persikofärgad glöd bakom. Sigillet är pausens två streck i ljust på
- * terrakotta, inte ett hjärta: det är en paus någon skickat.
+ * persikofärgad glöd bakom. Sigillet är ett hjärta i ljust på terrakotta
+ * (november 2026, på begäran; det var pausens två streck).
  * Brevet är krämvitt papper (`LETTER_PAPER`), samma som text-message.tsx
  * visar texten på, så att brevet som glider ut är det man sedan läser.
  *
@@ -54,13 +54,13 @@ export const LETTER_PAPER = {
   inkSoft: 'rgba(42,31,40,0.62)',
 };
 
-const KIND_LABEL: Record<SupportKind, string> = {
+export const KIND_LABEL: Record<SupportKind, string> = {
   text: 'A few words',
   voice: 'A voice message',
   video: 'A video',
   photo: 'A photo',
 };
-const KIND_ICON: Record<SupportKind, string> = {
+export const KIND_ICON: Record<SupportKind, string> = {
   text: 'feather-alt',
   voice: 'microphone',
   video: 'video',
@@ -237,10 +237,9 @@ export function SupportEnvelope({
         </Svg>
       </Reanimated.View>
 
-      {/* Sigillet: pausens två streck där flikens spets möter fickan. */}
+      {/* Sigillet: ett hjärta där flikens spets möter fickan. */}
       <Reanimated.View style={[styles.seal, { top: FLAP_H - 24 }, sealStyle]} pointerEvents="none">
-        <View style={styles.sealBar} />
-        <View style={styles.sealBar} />
+        <FontAwesome5 name="heart" solid size={19} color={ENVELOPE.sealMark} style={styles.sealHeart} />
       </Reanimated.View>
     </Reanimated.View>
   );
@@ -285,5 +284,6 @@ const makeStyles = (
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
     borderWidth: 2, borderColor: alpha('#ffffff', 0.7),
   },
-  sealBar: { width: 5, height: 18, borderRadius: 2.5, backgroundColor: ENVELOPE.sealMark },
+  // Hjärtats tyngd ligger lågt i glyfen; en punkt upp står det mitt i skivan.
+  sealHeart: { marginTop: 1 },
 });

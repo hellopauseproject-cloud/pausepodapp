@@ -833,10 +833,9 @@ skriver. Tre saker att veta:
   första 50 pauserna får 50 olika. Uppskattningar per tagg (≈ 14 pages) och
   dagens summa stod där en kort stund och togs bort på begäran. Ett kort i
   taget står vänt.
-- **Kretsens flöde får inte taggen** — `circle_activity` skrevs när pausen
-  sparades. Ska taggen synas där krävs en ny RPC, och det är ett eget förslag.
-- Inga att göra-punkter som taggar än: de hade kunnat bli ens "top intention"
-  i wrapped, som vänner ser. Det kräver en ändring i wrapped först.
+- **Kretsen ser taggarna** (november 2026, på begäran) — se *Kretsens
+  intentioner* under Circles. Flödet visar taggen läst ur pausen nu, så en
+  tagg satt efteråt syns där; en egen intention står som *Other*.
 
 **En paus startas på två sätt, och varje paus går bara en väg.** v8 har
 NFC och WiFi, och tumplattorna är borta.
@@ -1237,9 +1236,11 @@ en skärm som *är* en kamera behöver inte heta "Photo"), **`Support from
 **En känd skavank, vald och inte förbisedd:** `stöd: 'Support'` är också en av
 de 24 tonerna, så kollisionen är inte helt borta — den är flyttad till ett ord
 som i engelska är brett nog att bära båda betydelserna, och som redan är
-domänens ord i hela kodbasen. `pepp: 'Pep'` och `motivationstal: 'Pep talk'`
-står kvar som toner, för där är de idiomatisk engelska och krockar inte längre
-med något funktionsnamn.
+domänens ord i hela kodbasen. `motivationstal: 'Pep talk'` står kvar som ton,
+för där är det idiomatisk engelska och krockar inte längre med något
+funktionsnamn. `pepp: 'Pep'` erbjuds inte längre (november 2026, på begäran;
+`RETIRED_TONE_IDS` i friends.tsx), men etiketten står kvar så att gamla
+förfrågningar visar den.
 
 Ett svar på en stöd-story kan vara **text, röst, video eller foto**. De fyra
 ligger som fyra piller i story-läsaren ([app/(tabs)/friends.tsx](app/(tabs)/friends.tsx)),
@@ -1255,7 +1256,7 @@ bakom en annan ikon, så samma sak hade två ingångar. Nu är det ett kort
 överst i fliken (*Anna sent you support · Open the envelope*,
 `SupportInboxCard`) och en skärm,
 [app/support-arrived.tsx](app/support-arrived.tsx): *Support coming your
-way!*, ett kuvert som guppar lugnt med pausens två streck som sigill, och
+way!*, ett kuvert som guppar lugnt med ett hjärta som sigill, och
 *Open* / *Later*. Kuvertet ([components/support-envelope.tsx](components/support-envelope.tsx))
 viker upp fliken, brevet glider ut (med fotot, textens början, eller
 sortens ikon på), och tonar över i samma visningsskärmar som förut.
@@ -1274,8 +1275,11 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
 - **Kuvertet är nästan vitt med en aning persika**, i båda lägena: krämvit
   ficka, persikofärgad insida och flik, en tunn terrakottakant, skugga och en
   persikofärgad glöd bakom. Krämvitt utan kant smälte in i rummets botten,
-  och ett blått kuvert prövades och föll på begäran. Sigillet är pausens två
-  streck i ljust på terrakotta (ett hjärta satt där först).
+  och ett blått kuvert prövades och föll på begäran. Sigillet är ett hjärta
+  i ljust på terrakotta (först ett hjärta, sedan pausens två streck, och
+  sedan november 2026 hjärtat igen, på begäran). Kuvertet står mitt på
+  skärmen: rubriken och knapparna tar lika mycket höjd var. *Open* är appens
+  vanliga platta blå knapp, inte versaler.
 - **Textsvaret är ett brev, inte en sms-tråd** ([app/text-message.tsx](app/text-message.tsx)):
   samma krämvita papper som brevet i kuvertet (`LETTER_PAPER`), *From Anna*
   överst, texten handskriven i Kalam på linjer med samma steg (`LINE`), lite
@@ -1293,8 +1297,24 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
   hjärta i stället för bocken. Två kolumner på `support_responses`
   (`thanked_at`, `thanks_seen_at`), skrivna genom RPC:er. **Ingen notis**,
   och kortet räknas inte in i flikbrickan — det väntar inte på ett svar.
-  **Det finns ingen historik över stöd man fått, med flit:** ett svar syns
-  en gång, och det är en del av varför folk skickar.
+  **Stöd man öppnat går att se igen i 24 timmar, sedan inte** (november
+  2026, på begäran; [app/support-history.tsx](app/support-history.tsx)).
+  Förr fanns ingen historik alls, med flit — ett svar syntes en gång, och
+  det var en del av varför folk skickar. Fönstret är kompromissen: det går
+  att gå tillbaka till det man fick i dag, men det blir inget arkiv.
+  - Ingången är en klocka (`history`) i Support-flikens rubrikrad, och den
+    syns bara när det finns något i fönstret.
+  - **Fönstret räknas från första öppningen** (`delivered_at`), inte från
+    när svaret skickades — ett förseglat svar kan ha väntat i dagar.
+    Visningsskärmarna skriver `delivered_at` vid varje visning, så en
+    trigger låser den första ([supabase/support_history.sql](supabase/support_history.sql),
+    körs för hand efter support_sealed.sql). Utan den flyttar varje omtitt
+    fram fönstret.
+  - **Inget raderas**: raden filtreras bort vid läsning
+    (`recentSupportQuery` i lib/supportStories.ts), samma linje som
+    förfrågningarnas `liveStoryFilter` — det finns ingen cron.
+  - Kuvertet och historiken öppnar svaret genom samma
+    `openSupportResponse` ([lib/supportOpen.ts](lib/supportOpen.ts)).
 - **Den som skickar kan försegla stödet tills mottagaren pausat**
   ([supabase/support_sealed.sql](supabase/support_sealed.sql), körs för hand
   efter support_photo.sql och sleep.sql; kör om social_notify.sql efteråt).
@@ -1841,8 +1861,11 @@ på marinblått. Statusraden tvingas ljus på skärmen av samma skäl.
 - **Kameraskärmarna** (`video`, `support-respond-video`,
   `support-respond-photo`) och fotovisaren (`support-view-photo`): där *är*
   bilden bakgrunden. Samma undantag som redan står under *Två lägen, en palett*.
-- **Introduktionen** (`app/intro.tsx`): den körs innan man vet att flikarna finns,
-  så det finns inget rum att ärva.
+- ~~**Introduktionen**~~ står numera i `pause`-rummet (november 2026, på
+  begäran): blå som PAUSE-knappen man möter efteråt, i stället för basens
+  plommon. Skälet att den stod utanför — att den körs innan man vet att
+  flikarna finns — gäller fortfarande, men rummet behöver inte ärvas för att
+  stå där.
 - **Inloggningen** (`app/auth/`): samma sak, och dessutom inget konto än.
 - **`app/modal.tsx`**: kvarlämnad Expo-mall som inget i appen leder till.
 
@@ -1922,6 +1945,16 @@ inte regeln.
   **Ett tryck på ringen öppnar målratten (`RING_OPENS_GOAL = true`)**, och då
   står målet inuti ringen (`of 1h`) och raden `− 1h +` visas inte — ringen
   får dess höjd. `false` ger tillbaka raden och tar bort `of` ur ringen.
+  **Rutan är [components/daily-goal-card.tsx](components/daily-goal-card.tsx)**
+  (november 2026, på begäran — den var platt): **ringen är reglaget**
+  ([components/goal-dial.tsx](components/goal-dial.tsx)). Man drar en knopp
+  runt ringen; bågen är målet, från en liten båge vid 10 min till hela varvet
+  vid 12 h, talet i mitten följer fingret, och släppt glider bågen till
+  närmaste steg med haptik per steg. Den slår inte runt förbi tolv. Dagens
+  tid visas **inte**: en kopia av Hems ring med dagens tid mot målet prövades
+  först och stod tom och död vid 0 minuter. *Save goal* har PAUSE-knappens
+  material. Kretsen öppnar fortfarande listan (`DurationWheel`), som fick en
+  mjuk kapsel i `hueTint` i stället för linjer och en toning mot kortets yta.
   **De stora ringarna glöder** (`glow` på `ProgressArc`, Hem och Kretsens
   stora ring, inte brickorna): en bred båge under den skarpa, målad med en
   radiell toning som är starkast mitt på strecket och tonar bort ut och in
@@ -2006,7 +2039,58 @@ inte regeln.
   av ratten hade glidit isär — samma skäl som `intro-chrome.tsx` finns för att
   stegen inte ska bli sju skelett.
 
-### Vanorna — en intention och dagar i veckan
+### Veckans taggar — en spegel i hörnet, inte ett mål
+
+**Hems nedre vänstra hörn visar veckans taggar som streck**
+([components/week-tally.tsx](components/week-tally.tsx),
+[lib/weekTally.ts](lib/weekTally.ts), november 2026, på begäran): **ett
+streck per taggad paus** sedan måndag i telefonens tid, ingen målsiffra och
+inget tak. Utan taggar i veckan syns inte hörnet alls.
+
+- **Exklusivt genom återhållsamhet och en avslöjning.** Hörnet är *THIS
+  WEEK* i glesa versaler och en enda rad korta **platta, rundade streck**
+  ([components/tally-rod.tsx](components/tally-rod.tsx)) i rummets kulör;
+  intentionerna skiljs bara åt av en större lucka. Över fjorton streck står
+  resten som `+N`. **Kulören bor inuti:** ett tryck öppnar arket med varje
+  intention — emoji, namn och sina streck i sin egen ton — och *Tag your
+  pauses ›*, som öppnar statistiken nedrullad till *Recent pauses*
+  (`/stats?focus=recent`). Arket har ingen förklarande text.
+- Det som föll på begäran: emoji och kulör per intention i hörnet (rörigt),
+  strecken i glas med PAUSE-knappens material och en ljusreflex, och raderna
+  *N pauses with an intention* och *Every tagged pause adds a line*.
+- Ett nytt streck växer upp ur raden med en haptik.
+- **De otaggade står sist, i ljusgrått och utan emoji** (`ink20` för
+  strecken, `ink40` för texten, en tom rund ruta i `ink08`), i hörnet och
+  som raden *Untagged* i arket — pauser från en minut, samma gräns som taggkortet.
+  Taggas en växer ett fullt streck fram och ett tonat försvinner; bara det
+  taggade ger haptik. Hörnet syns alltså så fort veckan har en paus.
+
+- **Det ersatte vanemålen** (nedan), av tre skäl. Tiden i ringen ska vara
+  sidans enda löfte, och ett andra mål i en annan enhet slogs med den. Målen
+  krävde en inställning som nästan ingen gjorde — en användare av 29, medan
+  hälften av alla pauser redan taggas. Och den som nått ett vanemål fick
+  ingenting för nästa paus; strecken har ingen ände.
+- **Ringens språk, inte vattnets.** Ett nytt streck ritar sin kontur färdig
+  med ringens svep (`strokeDashoffset`, ~0,9 s), fylls i intentionens ton med
+  ett mjukt sken och landar med en haptik. Det går när räkningen stigit sedan
+  hörnet senast visades: Hem byter `refreshKey` när taggkortet stängs och när
+  pausens rad landat, och en tagg satt i statistiken syns när man kommer
+  tillbaka till Hem.
+- Formen kom ur en genomgång av prisade vaneappar (Streaks, (Not Boring)
+  Habits, Gentler Streak, Duolingos tomma frysplatser), och den prövades i
+  tre steg: en hel pausmarkering (två streck) per dag föll för ett streck per
+  gång, och tonade kapslar sida vid sida med PAUSE-knappens stora streck föll
+  för att de trängde sig på.
+- Två rader ryms under PAUSE-knappens golv (56), som lappen. En tredje gör
+  inte det: hörnet rapporterar sin höjd och Hem lyfter blocket med det som
+  sticker upp (`cornerLift`, i extras och som blockets `paddingBottom`).
+  Borta i nattläge och medan taggkortet står uppe.
+
+### Vanorna — en intention och dagar i veckan (vilande)
+
+**Ingen yta i appen läser eller sätter vanemålen längre** — se *Veckans
+taggar* ovan. Koden och schemat står kvar så att de går att ta tillbaka;
+det som följer beskriver dem som de var.
 
 Efter önskemål från användare om mål kopplade till vanor och inte bara tid.
 Ett vanemål är *📖 Reading · 3× a week*: en intention och ett antal dagar.
@@ -2015,30 +2099,28 @@ Schemat bor i [supabase/habits.sql](supabase/habits.sql) (körs för hand efter
 [components/habit-goals-editor.tsx](components/habit-goals-editor.tsx).
 
 - **Det är ingen ny registrering.** En vana räknas ur pauser som redan bär
-  intentionen, vald före pausen eller taggad efteråt. Pausen är fortfarande
-  appens enda handling, och taggkortet efter pausen får ett skäl till.
-- **De sätts i dagsmålets ruta på Hem** (ett tryck på ringen), under ratten,
-  och sparas med samma knapp (*Save goals*). Profilens intentioner valdes bort
-  som plats: användarna går inte dit. Rutan heter *Your goals*, med *TIME · a
-  day* och *HABITS · days a week*. *Add a habit* byter rutans innehåll mot
+  intentionen, vald före pausen eller taggad efteråt.
+- **De sattes i en ruta på Hem**, först under dagsmålets ratt (*Your goals*)
+  och sedan en kort tid i en egen ruta bakom hörnet. *Add a habit* byter
+  rutans innehåll mot
   *Choose a habit*: alla intentioner som rutor, tre i bredd, i sina egna
   toner, och de som redan är vanor nedtonade med en bock. En rad chips att
   svepa i satt där först och gömde de flesta. Sist står **+ Your own**, med
   profilens två fält (emoji och namn): den nya intentionen sparas som en egen
   i samma fil (`addCustomCategory` i app/pauseLogger.ts), läggs till bland de
   som erbjuds före pausen, och blir direkt en vana.
-- **Högst två** (`MAX_HABITS`, speglat i `set_habit_goals`). Två går att
-  hålla i huvudet, och rutan får plats på en iPhone SE.
+- **Högst tre** (`MAX_HABITS`, speglat i `set_habit_goals`; var två och
+  höjdes på begäran i november 2026). Rutan får plats på en iPhone SE nu
+  när ratten inte delar den. **Kör om habits.sql** — en gammal databas
+  vägrar den tredje.
 - **Fyra regler i `get_habit_progress`:** dagar och inte pauser (två läspauser
   samma dag är en dag), veckan börjar måndag i användarens egen tid, pauser
   under fem minuter räknas inte, och bara `kind = 'pause'`.
 - **Etikett eller id:** intentionen ligger som `READING` eller `read`, så
   målraden sparar båda (`label` kopieras vid sparningen) och räkningen
   matchar på endera.
-- **Ingen notis, och inget på Hem än.** En tyst rad under ringen
-  (*📖 2/3 · 🚶 1/2*) är nästa steg att pröva, liksom raden på taggkortet
-  (*2 of 3 this week*). Kretsen ser inte vanorna; intentionen har alltid
-  varit privat.
+- **Ingen notis.** Raden på taggkortet (*2 of 3 this week*) är nästa steg
+  att pröva. Kretsen ser inte vanorna.
 
 ## Sömnläget — en natt är ingen paus
 
@@ -2325,6 +2407,14 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
     saker med samma namn på samma skärm. Tabellen och aktivitetstypen
     `weekly_goal_updated` behåller sina gamla namn; bara orden användaren ser
     ändrades.
+  - **Att göra är rivet (november 2026, på begäran).** Lappen på Hem gav
+    plats åt veckans taggar (se *Veckans taggar*), kretsens lappar åt
+    kretsens intentioner (se *Kretsens intentioner*), och
+    `components/todo-sheet.tsx` och `lib/todos.ts` är raderade. *Ask for
+    support* läser inte längre listan, så gruppen *On your list* står
+    aldrig. `wishlist_items` står kvar oläst, och **`wishlist.sql` ska stå
+    kvar**: den bär också förfrågningarnas `recipient_ids`-policy. Det som
+    följer är historiken.
   - **Att göra är tillbaka, som en lapp och inte ett lakan.** Lakanet *To do*
     längst ner på Hem och kretsflikens sektion *To do* revs för att de tog för
     mycket plats. Listan kom tillbaka på begäran som **ett hörn av en post-it
@@ -2433,9 +2523,7 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
     - **Att bocka av går genom `complete_wishlist_item`**, så kretsens flöde
       får sin `wishlist_completed`-rad som förut. Att ångra en bock är en
       direkt update, och flödets rad står kvar.
-    - Allt läses och skrivs i [lib/todos.ts](lib/todos.ts). *Ask for
-      support* läser fortfarande listan direkt (gruppen *On your list*), och
-      den gruppen fylls nu på igen.
+    - Allt lästes och skrevs i `lib/todos.ts` (raderad).
   - **Ringvyn (`CIRCLE_RINGS_VIEW = true`) ersätter streckvyn nedan.** Överst
     en ring för hela kretsen (allas minuter mot allas mål, `potTotals`), med
     etiketten `EVERYONE`; under den en liten ring per medlem, fem i bredd,
@@ -2687,11 +2775,11 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
   på raden under strecken. Medlemskortens
   `pencil-alt` är borta av ett annat skäl — se *Att göra* nedan.
   - **Målratten går i hela timmar, med en halvtimme som första steg**
-    (`GOAL_OPTIONS`: 30 min, 1–12 h — tretton detenter; taket är `set_daily_goal`s 12 h). Halvtimmessteg hela vägen
-    gav tolv detenter där hälften bara var `2h 30min`-varianter av sina
-    grannar: stökigt att läsa utan att bli mer användbart. Den enda
-    halvtimmen som bär något är den första, för 30 min och 1 h är verkligt
-    olika löften. Ett äldre mål på en halvtimmesnivå snäppar till närmaste
+    (`GOAL_OPTIONS`: 10, 20, 30, 45 min, sedan 1–12 h — sexton steg; golvet
+    sänktes från 30 min på begäran i november 2026, och `set_daily_goal` tar
+    emot ner till 5 min). Halvtimmessteg hela vägen gav detenter där hälften
+    bara var `2h 30min`-varianter av sina grannar: stökigt att läsa utan att
+    bli mer användbart. Under en timme är stegen verkligt olika löften. Ett äldre mål på en halvtimmesnivå snäppar till närmaste
     hela timme nästa gång ratten öppnas och sparas — `nearestGoalIndex()`
     avrundar nedåt vid exakt lika avstånd.
   - **Men *Set your goal* står alltid synlig när inget mål finns.**
@@ -2786,6 +2874,7 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
     inte på dem — ett "hen är med i en krets men du får inte se vilken" vore
     att läcka just det som inte lämnas ut. Raden uteblir helt.
   - **`profiles.show_stats` läses inte längre någonstans** (november 2026, på begäran): växeln *Show my stats* i profilen är borttagen, och vänner ser alltid pausstatistiken. Kolumnen står kvar oläst. Policyn på `pause_sessions` har aldrig läst den, så ingen SQL behövdes. *What do you do during your pause?* flyttade från Settings till profilen ([components/intention-settings.tsx](components/intention-settings.tsx)) och sparas vid varje tryck; Settings har ingen Spara-knapp längre.
+  - **Intentionerna (valda och egna) bor i `user_intentions`** ([supabase/intentions.sql](supabase/intentions.sql), körs för hand), en egen tabell med RLS för ägaren — inte på `profiles`, där RLS är av och egna intentioner hade blivit läsbara för alla. Filerna `selectedCategories.json`/`customCategories.json` är en cache: varje skrivning går till filen och sedan upp, inloggningen hämtar ner (`syncIntentions` i app/pauseLogger.ts), och en installation utan rad skickar upp det som ligger lokalt. **Allt kontobundet på telefonen rivs vid utloggning** ([lib/localAccountData.ts](lib/localAccountData.ts)): profilen och fotot, intentionerna, pausloggen och några flaggor. Förr följde de med till nästa konto på samma telefon. Ny lokal data som hör till ett konto ska in i den listan.
 - **`profiles.show_stats` gäller inte här.** Den flaggan styr pausaktivitet
     (senaste pausen, wrapped-knappen), står `false` som förval, och en
     kretstillhörighet är hemvist snarare än statistik — att gömma den bakom
@@ -2843,8 +2932,12 @@ stämma). `circle_members.user_id` är inte längre `UNIQUE`; paret
   [app/(tabs)/circle.tsx](app/(tabs)/circle.tsx)): en per krets och ett
   `+` så länge det finns plats, i sidled rullbar. Den står där också med en
   enda krets, så att det syns att det går att ha fler. Den valda är en
-  **grön ton med grön kant och grön text** (`hueTint`, `hue`), inte
-  ifylld, och de andra är neutrala (`ink06`, `textSecondary`). Ifylld i
+  **grön ton med grön text** (`hueTint`, `hue`), utan kant och inte
+  ifylld, och de andra är **bara grå text** utan yta (`textTertiary`) —
+  bara `+` har en svag yta (`ink06`). En rad grå kapslar med kanter var för
+  rörig (november 2026, på begäran): nu har bara den valda en form, raden
+  har luft under sig, och vapenraden under är dämpad (märket 44, namnet 22,
+  `⌄` grå och mindre, så att inte fyra saker på raden bär rummets grönt). Ifylld i
   `hue` stod den i exakt samma grönt som logotypen och läste som en del av
   den; ifylld i accenten kändes blått fel i det gröna rummet (båda föll på
   begäran). En prick på en annan krets betyder olästa i dess chatt, och på
@@ -2880,6 +2973,39 @@ stämma). `circle_members.user_id` är inte längre `UNIQUE`; paret
 - **Körordning:** circles.sql, sedan circle_chat.sql, circle_rewards.sql,
   circle_goal_notify.sql och wishlist.sql. Kör SQL:en **före** appen: den
   nya klienten skickar `p_circle_id`, som en gammal databas inte känner.
+
+### Kretsens intentioner
+
+**Vad kretsen gjorde med sina pauser står mellan ringen och flödet**, där
+att göra-lapparna satt ([components/circle-intentions.tsx](components/circle-intentions.tsx),
+[lib/circleIntentions.ts](lib/circleIntentions.ts),
+[supabase/circle_intentions.sql](supabase/circle_intentions.sql), november
+2026, på begäran): upp till fem rader med emoji, namn, ett platt rundat
+streck i rummets kulör på `hueTrack` och **tiden** — *📖 Reading 6h*. Tid och inte antal: kretsen är
+byggd kring en pott av tid, och tio personers pauser hade gjort antalet
+streck oläsligt.
+
+- **Sektionen heter *Habits*** (på begäran; *Intentions* var det första
+  namnet). Ordet *intention* står kvar där man väljer en före pausen.
+- **Den följer ringen**: samma period (vecka eller dag, nu eller bakåt) och
+  samma val — en vald medlem visar bara hens (*Habits · Anna*). Talen är
+  ledgerns räknade sekunder, så fördelningen säger aldrig mer än potten.
+  **Otaggade pauser står sist som *Untagged*, i ljusgrått och utan emoji**,
+  liksom en raderad
+  paus vars ledgerrad står kvar — så att raderna tillsammans är potten. Hämtas när perioden byts och när flödet
+  fått en ny pausrad eller tagg, inte i fyrsekunderspollen.
+- **Taggarna är inte hemliga i en krets**, och det finns ingen inställning.
+  **Egna intentioner lämnas aldrig ut med namn**: de blir *Other*
+  (`circle_intention_key` i SQL, inte i klienten). Det är också vägen för
+  den som vill hålla det för sig själv — samma regel som Global Pause.
+- **Flödet visar taggen läst ur pausen nu** (`get_circle_activity_tags`), så
+  att en tagg satt efteråt på Hem eller i statistiken syns inom fyra
+  sekunder. Flödets pausrader bär därför `session_id` i metadatan
+  (`record_circle_pause`), och äldre rader fick den en gång ur ledgern.
+  *Other* blir *took a 40 min pause to do their own thing*.
+- **Körordning:** circles.sql, sedan circle_intentions.sql. Utan den senare
+  står sektionen tom och flödet visar bara intentionen som valdes före
+  pausen — inget felar.
 
 ### Kretsens inställningar
 

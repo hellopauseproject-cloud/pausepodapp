@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { readDoc, writeDoc } from '../lib/docStore';
+import { deleteDoc, readDoc, writeDoc } from '../lib/docStore';
+import { supabase } from '../lib/supabase';
 
 const LOG_PATH = 'pauseLogs.json';
 const CATEGORIES_PATH = 'selectedCategories.json';
@@ -92,13 +93,93 @@ export interface PauseLog {
   category?: string;
 }
 
+const CUSTOM_CATEGORIES_PATH = 'customCategories.json';
+
+// ── Intentionerna i Supabase ─────────────────────────────────────────────
+//
+// Källan är `user_intentions` (supabase/intentions.sql); de två filerna är en
+// cache, så att pausskärmen läser direkt och utan nät. Varje skrivning går
+// till filen först och sedan upp, och vid inloggning hämtas raden ner
+// (`syncIntentions`). Filerna rivs vid utloggning (lib/localAccountData.ts).
+//
+// Uppskickningen läser filerna när den körs, inte när den köades, och
+// köerna körs i tur och ordning — två snabba tryck kan alltså inte landa i
+// fel ordning, och den sista skrivningen är alltid den som står kvar.
+// Misslyckas den ligger `INTENTIONS_DIRTY_KEY` kvar, och nästa appstart
+// skickar upp i stället för att hämta ner.
+export const INTENTIONS_DIRTY_KEY = 'intentions_dirty';
+
+const readJson = async <T,>(name: string): Promise<T | null> => {
+  try { return JSON.parse(await readDoc(name)) as T; } catch { return null; }
+};
+
+let pushChain: Promise<void> = Promise.resolve();
+
+const pushIntentions = () => {
+  AsyncStorage.setItem(INTENTIONS_DIRTY_KEY, '1').catch(() => {});
+  pushChain = pushChain.then(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user.id;
+    if (!userId) return;
+    const selected = await readJson<string[]>(CATEGORIES_PATH);
+    const custom = (await readJson<Category[]>(CUSTOM_CATEGORIES_PATH)) ?? [];
+    const { error } = await supabase
+      .from('user_intentions')
+      .upsert({ user_id: userId, selected, custom, updated_at: new Date().toISOString() });
+    if (error) {
+      console.warn('[intentions] kunde inte sparas:', error.message);
+      await AsyncStorage.setItem(INTENTIONS_DIRTY_KEY, '1');
+      return;
+    }
+    await AsyncStorage.removeItem(INTENTIONS_DIRTY_KEY);
+  }).catch(() => {});
+};
+
+/**
+ * Vid inloggning (contexts/AuthContext.tsx). Finns en rad hämtas den ner över
+ * filerna. Finns ingen är det en installation från före tabellen, och det som
+ * ligger lokalt skickas upp. Ett nätfel lämnar filerna som de är.
+ */
+export const syncIntentions = async (userId: string) => {
+  try {
+    if (await AsyncStorage.getItem(INTENTIONS_DIRTY_KEY)) { pushIntentions(); return; }
+    const { data, error } = await supabase
+      .from('user_intentions')
+      .select('selected, custom')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) { console.warn('[intentions] kunde inte hämtas:', error.message); return; }
+    if (!data) {
+      const hasLocal = (await readJson(CATEGORIES_PATH)) !== null || (await readJson(CUSTOM_CATEGORIES_PATH)) !== null;
+      if (hasLocal) pushIntentions();
+      return;
+    }
+    // null = aldrig valt; filen tas bort så att getSelectedCategories ger förvalet.
+    if (data.selected === null) await deleteDoc(CATEGORIES_PATH);
+    else await writeDoc(CATEGORIES_PATH, JSON.stringify(data.selected));
+    await writeDoc(CUSTOM_CATEGORIES_PATH, JSON.stringify(data.custom ?? []));
+  } catch (e) {}
+};
+
 export const saveSelectedCategories = async (categoryIds: string[]) => {
   try {
     await writeDoc(CATEGORIES_PATH, JSON.stringify(categoryIds));
   } catch (e) {}
+  pushIntentions();
 };
 
-const CUSTOM_CATEGORIES_PATH = 'customCategories.json';
+/** Den sparade listan, eller `null` om inget val gjorts (förvalet gäller). */
+export const getSelectedCategoryIds = () => readJson<string[]>(CATEGORIES_PATH);
+
+export const getCustomCategories = async (): Promise<Category[]> =>
+  (await readJson<Category[]>(CUSTOM_CATEGORIES_PATH)) ?? [];
+
+export const saveCustomCategories = async (cats: Category[]) => {
+  try {
+    await writeDoc(CUSTOM_CATEGORIES_PATH, JSON.stringify(cats));
+  } catch (e) {}
+  pushIntentions();
+};
 
 export const getSelectedCategories = async (): Promise<Category[]> => {
   try {

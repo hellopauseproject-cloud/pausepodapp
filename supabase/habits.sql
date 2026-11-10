@@ -21,8 +21,9 @@
 --     på en paus på 40 sekunder inte bockar av något.
 --   * **Bara pauser** (`kind = 'pause'`), aldrig en natt.
 --
--- Högst två vanor per person. Två går att hålla i huvudet; fler är en
--- vanetracker, och det är en annan app. Taket sitter i `set_habit_goals`.
+-- Högst tre vanor per person (var två, höjt på begäran i november 2026).
+-- Fler är en vanetracker, och det är en annan app. Taket sitter i
+-- `set_habit_goals`, speglat av `MAX_HABITS` i lib/habits.ts.
 --
 -- ── Etikett eller id ────────────────────────────────────────────────────────
 --
@@ -76,8 +77,8 @@ begin
   if jsonb_typeof(coalesce(p_goals, '[]'::jsonb)) <> 'array' then
     raise exception 'Habits must be a list.';
   end if;
-  if jsonb_array_length(coalesce(p_goals, '[]'::jsonb)) > 2 then
-    raise exception 'You can have at most two habits.';
+  if jsonb_array_length(coalesce(p_goals, '[]'::jsonb)) > 3 then
+    raise exception 'You can have at most three habits.';
   end if;
 
   delete from habit_goals

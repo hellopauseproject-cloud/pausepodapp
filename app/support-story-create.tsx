@@ -1,5 +1,4 @@
 import { Entypo, FontAwesome5 } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
 import DismissKeyboardView from './components/DismissKeyboardView';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -12,13 +11,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { enablePushNotifications } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
 import { storyExpiresAt } from '../lib/supportStories';
-import { Category, DEFAULT_CATEGORIES } from './pauseLogger';
+import { Category, DEFAULT_CATEGORIES, getCustomCategories } from './pauseLogger';
 import { AppPalette, alpha } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { lastEmoji } from '../lib/emojiInput';
 
-const CUSTOM_CATEGORIES_PATH = (FileSystem.documentDirectory ?? '') + 'customCategories.json';
 
 const SUPPORT_TYPES = [
   { id: 'tröst', label: 'Comfort' },
@@ -99,11 +97,8 @@ function SupportStoryCreateScreen() {
 
   useEffect(() => {
     (async () => {
-      try {
-        const json = await FileSystem.readAsStringAsync(CUSTOM_CATEGORIES_PATH);
-        const customCats: Category[] = JSON.parse(json);
-        if (customCats.length > 0) setCategories([...DEFAULT_CATEGORIES, ...customCats]);
-      } catch { /* no custom categories */ }
+      const customCats = await getCustomCategories();
+      if (customCats.length > 0) setCategories([...DEFAULT_CATEGORIES, ...customCats]);
     })();
   }, []);
 

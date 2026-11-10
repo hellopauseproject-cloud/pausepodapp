@@ -338,7 +338,7 @@ export default function SupportRespondPhotoScreen() {
         )}
 
         {phase === 'editing' && !editingCaption && (
-          <OpensPicker sealed={sealed} onChange={setSealed} ownerName={ownerName ?? ''} onDark />
+          <OpensPicker sealed={sealed} onChange={setSealed} ownerName={ownerName ?? ''} onDark centered />
         )}
         {phase === 'editing' && !editingCaption && (
           <View style={st.reviewActions}>

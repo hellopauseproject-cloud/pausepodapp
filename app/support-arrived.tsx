@@ -9,7 +9,7 @@ import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { SupportEnvelope, SupportKind } from '../components/support-envelope';
 import { supabase } from '../lib/supabase';
-import { setPending } from '../lib/supportQueue';
+import { openSupportResponse } from '../lib/supportOpen';
 import { unopenedResponsesQuery } from '../lib/supportStories';
 
 type Arrived = {
@@ -97,46 +97,7 @@ function SupportArrivedScreen() {
   }, [user?.id]);
 
   const goToContent = () => {
-    const a = arrived;
-    if (!a) return;
-    if (a.kind === 'voice' || a.kind === 'video') {
-      setPending({
-        id: a.id,
-        storyId: a.storyId,
-        responseType: a.kind,
-        contentUrl: a.contentUrl,
-        textContent: a.textContent,
-        senderName: a.senderName,
-        senderAvatarUrl: a.senderAvatarUrl,
-      });
-      router.replace(a.kind === 'video' ? '/video' : '/voice');
-      return;
-    }
-    if (a.kind === 'photo') {
-      router.replace({
-        pathname: '/support-view-photo',
-        params: {
-          messageId: a.id,
-          photoUrl: a.contentUrl ?? '',
-          caption: a.textContent ?? '',
-          // Null blir en tom sträng, som visningsskärmen läser som "inget
-          // sparat läge" och faller tillbaka på mitten.
-          captionY: a.captionY == null ? '' : String(a.captionY),
-          senderName: a.senderName,
-        },
-      } as any);
-      return;
-    }
-    router.replace({
-      pathname: '/text-message',
-      params: {
-        messageId: a.id,
-        textContent: a.textContent ?? '',
-        senderName: a.senderName,
-        senderAvatarUrl: a.senderAvatarUrl ?? '',
-        isSupport: 'true',
-      },
-    } as any);
+    if (arrived) openSupportResponse(arrived, 'replace');
   };
 
   const leave = () => {
@@ -171,6 +132,7 @@ function SupportArrivedScreen() {
       </Reanimated.View>
 
       <Pressable
+        style={styles.envelope}
         onPress={() => setOpen(true)}
         disabled={open}
         accessibilityRole="button"
@@ -210,21 +172,26 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     paddingHorizontal: Spacing.xl,
   },
   centered: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
-  head: { alignItems: 'center', gap: 10 },
+  // Rubriken och knapparna tar lika mycket höjd var (flex: 1), så att kuvertet
+  // mellan dem står mitt på skärmen och inte mitt mellan två olika höga block.
+  head: { flex: 1, alignSelf: 'stretch', alignItems: 'center', gap: 10 },
   eyebrow: { ...Palette.eyebrow, color: Palette.hue },
   title: {
     fontSize: 28, lineHeight: 32, fontWeight: '900', letterSpacing: -0.6,
     color: Palette.textPrimary, textAlign: 'center', textTransform: 'uppercase',
   },
   sub: { fontSize: 16, color: Palette.textSecondary, textAlign: 'center' },
-  actions: { alignItems: 'center', gap: 12, alignSelf: 'stretch' },
+  envelope: { marginVertical: Spacing.lg },
+  actions: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', gap: 12, alignSelf: 'stretch' },
   waiting: { fontSize: 13, color: Palette.textTertiary },
+  // Appens vanliga blå knapp (storyPrimary, primaryBtn i Kretsen): platt
+  // accent, kapsel, vanlig skiftläge. Den stod förr i versaler med spärrning.
   openBtn: {
     alignSelf: 'stretch', alignItems: 'center',
     backgroundColor: Palette.accent, borderRadius: Radius.pill,
-    paddingVertical: 16,
+    paddingVertical: 15,
   },
-  openText: { color: Palette.onAccent, fontSize: 16, fontWeight: '800', letterSpacing: 1.5, textTransform: 'uppercase' },
+  openText: { color: Palette.onAccent, fontSize: 15, fontWeight: '700' },
   laterBtn: { paddingVertical: 8, paddingHorizontal: 16 },
   laterText: { color: Palette.textSecondary, fontSize: 15, fontWeight: '600' },
 });

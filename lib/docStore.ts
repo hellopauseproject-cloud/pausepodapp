@@ -47,3 +47,12 @@ export async function readDoc(name: string): Promise<string> {
   }
   return FileSystem.readAsStringAsync(FileSystem.documentDirectory + name);
 }
+
+/** Tar bort dokumentet; ett som inte finns är ingen felsituation. */
+export async function deleteDoc(name: string): Promise<void> {
+  if (isWeb) {
+    await AsyncStorage.removeItem(webKey(name));
+    return;
+  }
+  await FileSystem.deleteAsync(FileSystem.documentDirectory + name, { idempotent: true });
+}

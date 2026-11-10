@@ -1,14 +1,18 @@
 import * as Haptics from 'expo-haptics';
-import { useMemo, useRef } from 'react';
+import { useId, useMemo, useRef } from 'react';
 import {
   NativeScrollEvent, NativeSyntheticEvent, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { GOAL_OPTIONS, formatDuration } from '../lib/circles';
 
 const WHEEL_ITEM_H = 44;
 const WHEEL_VISIBLE = 5; // udda tal, annars finns ingen mittrad att markera
+// Uttoningen över och under mittraden: raderna tonar in i kortets yta i
+// stället för i steg. Två rader höga, alltså allt utom mittraden.
+const FADE_H = WHEEL_ITEM_H * Math.floor(WHEEL_VISIBLE / 2);
 
 /**
  * Ridån man väljer dagsmål med. En ScrollView som snäpper per rad i stället
@@ -29,9 +33,12 @@ const WHEEL_VISIBLE = 5; // udda tal, annars finns ingen mittrad att markera
 export function DurationWheel({
   index,
   onIndexChange,
+  fadeColor,
 }: {
   index: number;
   onIndexChange: (i: number) => void;
+  /** Ytan ratten står på — uttoningen tonar mot den. Förval: modalens. */
+  fadeColor?: string;
 }) {
   const options = GOAL_OPTIONS;
   const Palette = usePalette();
@@ -39,6 +46,8 @@ export function DurationWheel({
   const ref = useRef<ScrollView>(null);
   const settled = useRef(false);
   const lastIndex = useRef(index);
+  const fade = fadeColor ?? Palette.modalSurface;
+  const gid = useId().replace(/:/g, '');
 
   const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const i = Math.max(0, Math.min(options.length - 1,
@@ -76,12 +85,7 @@ export function DurationWheel({
           return (
             <View key={sec} style={styles.wheelItem}>
               <Text
-                style={[
-                  styles.wheelItemText,
-                  distance === 0 && styles.wheelItemTextOn,
-                  // Mjuk uttoning mot kanterna, utan expo-linear-gradient.
-                  distance > 0 && { opacity: Math.max(0.18, 0.62 - (distance - 1) * 0.18) },
-                ]}
+                style={[styles.wheelItemText, distance === 0 && styles.wheelItemTextOn]}
               >
                 {formatDuration(sec)}
               </Text>
@@ -89,19 +93,42 @@ export function DurationWheel({
           );
         })}
       </ScrollView>
+      {/* Uttoningen ovanpå listan, mot kortets yta. Var förr en opacitet per
+          rad i steg; en toning gör att raderna glider in i kortet. */}
+      <Svg pointerEvents="none" style={styles.fadeTop} width="100%" height={FADE_H}>
+        <Defs>
+          <LinearGradient id={`${gid}t`} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={fade} stopOpacity={1} />
+            <Stop offset="1" stopColor={fade} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height={FADE_H} fill={`url(#${gid}t)`} />
+      </Svg>
+      <Svg pointerEvents="none" style={styles.fadeBottom} width="100%" height={FADE_H}>
+        <Defs>
+          <LinearGradient id={`${gid}b`} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={fade} stopOpacity={0} />
+            <Stop offset="1" stopColor={fade} stopOpacity={1} />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height={FADE_H} fill={`url(#${gid}b)`} />
+      </Svg>
     </View>
   );
 }
 
 const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   wheel: { height: WHEEL_ITEM_H * WHEEL_VISIBLE, justifyContent: 'center' },
+  // En mjuk kapsel i rummets ton, utan linjer över och under: linjerna gjorde
+  // markeringen till en tabellrad.
   wheelWindow: {
-    position: 'absolute', left: 0, right: 0, height: WHEEL_ITEM_H,
+    position: 'absolute', left: 24, right: 24, height: WHEEL_ITEM_H,
     top: WHEEL_ITEM_H * Math.floor(WHEEL_VISIBLE / 2),
-    backgroundColor: Palette.accentTint, borderRadius: Radius.md,
-    borderTopWidth: 1, borderBottomWidth: 1, borderColor: Palette.accentBorder,
+    backgroundColor: Palette.hueTint, borderRadius: Radius.pill,
   },
+  fadeTop: { position: 'absolute', left: 0, right: 0, top: 0 },
+  fadeBottom: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   wheelItem: { height: WHEEL_ITEM_H, alignItems: 'center', justifyContent: 'center' },
   wheelItemText: { fontSize: 19, fontWeight: '700', color: Palette.textSecondary },
-  wheelItemTextOn: { fontSize: 22, fontWeight: '900', color: Palette.textPrimary, letterSpacing: 0.5 },
+  wheelItemTextOn: { fontSize: 23, fontWeight: '900', color: Palette.hue, letterSpacing: 0.5 },
 });

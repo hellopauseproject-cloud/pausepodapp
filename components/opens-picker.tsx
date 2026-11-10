@@ -24,14 +24,16 @@ import { ENVELOPE } from './support-envelope';
  *
  * `onDark` är för kameraskärmarna, där botten är bilden och inte paletten.
  */
-export function OpensPicker({ sealed, onChange, ownerName, onDark = false }: {
+export function OpensPicker({ sealed, onChange, ownerName, onDark = false, centered = false }: {
   sealed: boolean;
   onChange: (sealed: boolean) => void;
   ownerName: string;
   onDark?: boolean;
+  /** Mitt över knapparna under (fotoskärmens *Retake* / *Send*). */
+  centered?: boolean;
 }) {
   const Palette = usePalette();
-  const s = useMemo(() => makeStyles(Palette, onDark), [Palette, onDark]);
+  const s = useMemo(() => makeStyles(Palette, onDark, centered), [Palette, onDark, centered]);
   const firstName = (ownerName || 'they').split(' ')[0];
   const pick = (next: boolean) => {
     if (next === sealed) return;
@@ -146,16 +148,17 @@ const overlay = StyleSheet.create({
   sealBar: { width: 4, height: 13, borderRadius: 2, backgroundColor: ENVELOPE.sealMark },
 });
 
-const makeStyles = (Palette: AppPalette, onDark: boolean) => StyleSheet.create({
-  wrap: { gap: 8, alignSelf: 'stretch' },
+const makeStyles = (Palette: AppPalette, onDark: boolean, centered: boolean) => StyleSheet.create({
+  wrap: { gap: 8, alignSelf: 'stretch', alignItems: centered ? 'center' : 'stretch' },
   label: {
     fontSize: 11, fontWeight: '700', letterSpacing: 1.4,
+    textAlign: centered ? 'center' : 'left',
     color: onDark ? 'rgba(255,255,255,0.7)' : Palette.textTertiary,
   },
   // Ett smalt spår med två lägen, inte två knappar: valet ska inte se ut som
   // något man måste göra.
   track: {
-    flexDirection: 'row', alignSelf: 'flex-start',
+    flexDirection: 'row', alignSelf: centered ? 'center' : 'flex-start',
     padding: 3, borderRadius: Radius.pill,
     backgroundColor: onDark ? 'rgba(0,0,0,0.4)' : Palette.ink07,
   },

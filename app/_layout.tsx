@@ -745,6 +745,7 @@ function InnerLayout() {
         <Stack.Screen name="stats" options={{ headerShown: false }} />
         <Stack.Screen name="profile" options={{ headerShown: false }} />
         <Stack.Screen name="add-friend" options={{ headerShown: false }} />
+        <Stack.Screen name="support-history" options={{ headerShown: false }} />
         <Stack.Screen name="pair" options={{ headerShown: false }} />
         <Stack.Screen name="global-pause" options={{ headerShown: false }} />
         <Stack.Screen name="friend-wrapped" options={{ headerShown: false, animation: 'fade' }} />

@@ -1,5 +1,5 @@
 import { FontAwesome, FontAwesome5, MaterialIcons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Animated, Image, Modal, Pressable, ScrollView, StyleSheet,
@@ -230,6 +230,13 @@ function StatsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { height } = useWindowDimensions();
+  // `/stats?focus=recent` (veckans taggar på Hem, *Tag your pauses*) öppnar
+  // sidan nedrullad till pauserna. En gång, när datan landat — innan dess
+  // står SLEEP-sektionen inte där och rubrikens läge är inte slutgiltigt.
+  const { focus } = useLocalSearchParams<{ focus?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const [recentY, setRecentY] = useState<number | null>(null);
+  const scrolledRef = useRef(false);
   const [sessions, setSessions]       = useState<SessionItem[]>([]);
   // Hjärtat fylls först när raderna landat, inte medan de hämtas.
   const [loaded, setLoaded]           = useState(false);
@@ -508,8 +515,17 @@ function StatsScreen() {
     }
   };
 
+  useEffect(() => {
+    if (focus !== 'recent' || scrolledRef.current || !loaded || recentY === null) return;
+    scrolledRef.current = true;
+    // En bildruta till, så att listan under rubriken hunnit läggas ut.
+    const t = setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, recentY - 12), animated: true }), 120);
+    return () => clearTimeout(t);
+  }, [focus, loaded, recentY]);
+
   return (
     <ScrollView
+      ref={scrollRef}
       // Bakåtknappen står `marginTop: 30` under kanten, så kanten ligger 22 pt
       // ovanför den gräns knappen ska hålla sig under.
       contentContainerStyle={[styles.container, { paddingTop: Math.max(10, insets.top - 22) }]}
@@ -580,7 +596,10 @@ function StatsScreen() {
 
           Här och inte uppe på bakåtraden: veckan hör ihop med pauserna den
           sammanfattar, och listan under rubriken är just de pauserna. */}
-      <Animated.View style={[styles.sectionHeadRow, { opacity: fadeAnim }]}>
+      <Animated.View
+        style={[styles.sectionHeadRow, { opacity: fadeAnim }]}
+        onLayout={e => setRecentY(Math.round(e.nativeEvent.layout.y))}
+      >
         <Text style={styles.sectionLabel}>RECENT PAUSES</Text>
 
         <TouchableOpacity

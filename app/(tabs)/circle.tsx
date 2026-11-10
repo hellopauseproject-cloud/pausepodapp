@@ -22,7 +22,7 @@ import { SegmentedPill } from '../../components/segmented-pill';
 import { alpha, AppPalette, Radius, roomPalette, Spacing } from '../../constants/appTheme';
 import { RoomProvider, usePalette, useTheme } from '../../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../../components/screen-background';
-import { CircleTodoNotes, TodoSheet } from '../../components/todo-sheet';
+import { CircleIntentions } from '../../components/circle-intentions';
 import { useAuth } from '../../contexts/AuthContext';
 import { safeBottom } from '../../lib/bottomInset';
 import { track } from '../../lib/analytics';
@@ -32,7 +32,7 @@ import {
   CIRCLE_LEVELS, circleLevelName, levelProgressFraction, secondsToNextLevel,
 } from '../../lib/circleLevels';
 import {
-  CIRCLE_MAX_PER_USER, CircleSettings, formatActivitySegments, formatCountWindow, formatDuration,
+  CIRCLE_MAX_PER_USER, CircleSettings, formatActivitySegments, formatCountRule, formatDuration,
   formatWeekRange, getCirclePeriod, getCircleProgress,
   getMyCircles, getSelectedCircleId, GOAL_OPTIONS, MyCircle, nearestGoalIndex, setDailyGoal,
   setSelectedCircleId, takeRequestedCircleSelection,
@@ -41,7 +41,9 @@ import { applyPendingDailyGoal, getPendingCircleWelcome, setPendingCircleWelcome
 import { enablePushNotifications } from '../../lib/notifications';
 import { supabase } from '../../lib/supabase';
 import { PausePodLogo } from '../../components/pause-pod-logo';
-import { getCircleTodos, Todo } from '../../lib/todos';
+import {
+  CircleIntentionRow, getCircleActivityTags, getCircleIntentions, sumIntentions,
+} from '../../lib/circleIntentions';
 import type { CircleMemberProgress, CirclePeriod, CirclePotNumbers, CircleProgress } from '../../types/database';
 
 const MAX_MEMBERS = 10;
@@ -93,10 +95,9 @@ function Avatar({ username, avatarUrl, size = 40 }: { username: string; avatarUr
 /**
  * Kretsraden överst i fliken: en kapsel per krets och ett `+` så länge det
  * finns plats. Den står där också med en enda krets, så att det syns att det
- * går att ha fler, på platsen där de sedan hamnar. Den valda fylls i rummets
- * kulör (kapseln är ett val, samma undantag som periodvalet), med samma
- * textregel som `SegmentedPill`: vit i ljust läge, rummets mörka botten i
- * mörkt.
+ * går att ha fler, på platsen där de sedan hamnar. Bara den valda har en form
+ * (en grön ton bakom grön text); de andra är grå text, så att raden läser
+ * som ett lugnt val och inte som en hylla kapslar.
  *
  * En prick på en annan krets betyder olästa i dess chatt (den valda har
  * chattknappen); på `+` en inbjudan man har plats att tacka ja till. Med tre
@@ -201,7 +202,9 @@ function CircleTitle({ title, onPress, dot, compact }: {
       accessibilityLabel={dot ? `${title}. Open circle menu. Something is waiting.` : `${title}. Open circle menu.`}
     >
       <Text style={titleStyle} numberOfLines={1}>{title}</Text>
-      <FontAwesome5 name="chevron-down" size={14} color={Palette.hue} />
+      {/* Dämpad: namnet, märket, LEVEL och chatten bar alla rummets grönt,
+          och fyra gröna saker på en rad var för många. */}
+      <FontAwesome5 name="chevron-down" size={11} color={Palette.textTertiary} />
       {dot && <View style={styles.titleDot} />}
     </TouchableOpacity>
   );
@@ -1076,10 +1079,9 @@ function CircleScreen() {
   /** Se välkomstsidan för nya medlemmar i load(). Ett försök per montering. */
   const welcomeCheckedRef = useRef(false);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
-  // Medlemmarnas att göra-listor, för lapparna. Hämtas i load() så att en
-  // bock hos någon annan syns inom fyra sekunder, precis som flödet.
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [showMyTodos, setShowMyTodos] = useState(false);
+  // Kretsens intentioner för perioden ringen visar (supabase/circle_intentions.sql).
+  // Null medan de hämtas eller om hämtningen föll.
+  const [intentionRows, setIntentionRows] = useState<CircleIntentionRow[] | null>(null);
   const [incomingInvites, setIncomingInvites] = useState<IncomingInvite[]>([]);
   // Olästa i chatten. Bara ett tal, och det visas som en prick och inte som
   // en siffra: hur många som skrivits sedan sist är inte en uppgift man ska
@@ -1238,13 +1240,16 @@ function CircleScreen() {
     // fram parkerade mål vid veckoskifte och skriver firandet om alla
     // klarat sitt. Att öppna fliken är alltså en av vägarna som får
     // veckoskiftet att ske — därför inget schemalagt jobb.
-    const [{ data: memberRows }, { data: activityRows }, progressRow, unreadCounts, rewardRow] =
+    const [{ data: memberRows }, { data: activityRows }, progressRow, unreadCounts, rewardRow, activityTags] =
       await Promise.all([
         supabase.from('circle_members').select('user_id, role, profile:profiles!user_id(id, username, avatar_url)').eq('circle_id', circleId).order('joined_at', { ascending: true }),
         supabase.from('circle_activity').select('id, actor_id, type, metadata, created_at, actor:profiles!actor_id(username, avatar_url)').eq('circle_id', circleId).order('created_at', { ascending: false }).limit(50),
         getCircleProgress(circleId),
         Promise.all(mine.map(c => countUnreadCircleMessages(c.id, c.chat_read_at ?? c.joined_at, user.id))),
         getCircleReward(circleId),
+        // Taggen på flödets pausrader, läst ur pausen nu: en tagg som sätts
+        // efteråt (Hem, statistiken) syns här inom fyra sekunder.
+        getCircleActivityTags(circleId),
       ]);
 
     // Byttes kretsen medan svaren var på väg hör de till fel krets.
@@ -1285,12 +1290,10 @@ function CircleScreen() {
     }));
     setMembers(memberList);
 
-    // Listorna kräver medlemmarnas id:n och väntas därför inte in: lapparna
-    // fylls ett ögonblick efter resten. Ett fel lämnar förra svaret kvar.
-    getCircleTodos(memberList.map(m => m.id)).then(setTodos).catch(() => {});
-
     setActivity((activityRows ?? []).map((a: any) => ({
-      id: a.id, actor_id: a.actor_id, type: a.type, metadata: a.metadata ?? {}, created_at: a.created_at,
+      id: a.id, actor_id: a.actor_id, type: a.type, created_at: a.created_at,
+      // Taggen nu går före intentionen som valdes före pausen.
+      metadata: activityTags[a.id] ? { ...(a.metadata ?? {}), category: activityTags[a.id] } : (a.metadata ?? {}),
       actorName: a.actor?.username ?? 'Someone', actorAvatar: a.actor?.avatar_url ?? null,
     })));
 
@@ -1298,6 +1301,31 @@ function CircleScreen() {
   }, [user]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Kretsens intentioner följer ringens period, nu eller bakåt. Hämtas om när
+  // perioden byts och när flödet fått en ny rad (en ny paus eller tagg), inte
+  // i fyrsekunderspollen.
+  const intentionRequest = useMemo(() => {
+    if (!circle) return null;
+    if (potMode === 'week') {
+      if (!progress?.week_start) return null;
+      const date = shiftWeek(progress.week_start, Math.min(0, periodOffset));
+      return { circleId: circle.id, mode: 'week' as const, date };
+    }
+    return { circleId: circle.id, mode: 'day' as const, date: isoLocal(localDay(Math.min(0, periodOffset))) };
+  }, [circle, potMode, periodOffset, progress?.week_start]);
+  const latestPauseTag = activity
+    .filter(a => a.type === 'pause_completed')
+    .slice(0, 10)
+    .map(a => `${a.id}:${a.metadata?.category ?? ''}`)
+    .join(',');
+  useEffect(() => {
+    if (!intentionRequest) return;
+    let alive = true;
+    const { circleId, mode, date } = intentionRequest;
+    getCircleIntentions(circleId, mode, date).then(rows => { if (alive) setIntentionRows(rows); });
+    return () => { alive = false; };
+  }, [intentionRequest, latestPauseTag]);
 
   // Vilken gången period som ska visas, eller null för nu. Veckan räknas från
   // pågående veckas måndag (serverns), dagen från klientens egen midnatt.
@@ -1418,7 +1446,7 @@ function CircleScreen() {
     setProgress(null);
     setMembers([]);
     setActivity([]);
-    setTodos([]);
+    setIntentionRows(null);
     setReward(null);
     setUnreadChat(unreadByCircle[id] ?? 0);
     setSelectedMemberId(null);
@@ -1685,6 +1713,11 @@ function CircleScreen() {
   // En gången period: samma ring, med medlemmarna som var med då. Medan nästa
   // period hämtas står den förra kvar hellre än att ringen blinkar tom.
   const past = periodOffset < 0;
+  // Intentionerna följer ringens val: en vald medlem, annars hela kretsen.
+  const intentionUserId = CIRCLE_RINGS_VIEW ? selectedMemberId : null;
+  const intentionWho = intentionUserId
+    ? (intentionUserId === user?.id ? 'You' : members.find(m => m.id === intentionUserId)?.username ?? null)
+    : null;
   const pastData = past ? (pastPeriod?.data ?? null) : null;
   // Den valda medlemmen får aldrig falla bort när man bläddrar — då visade
   // ringen plötsligt EVERYONE. Medan perioden hämtas (eller om hämtningen
@@ -1722,7 +1755,7 @@ function CircleScreen() {
               accessibilityRole="button"
               accessibilityLabel={`Level ${circleLevel}, ${circleLevelName(circleLevel)}. Open the ladder.`}
             >
-              <CircleLevelBadge level={circleLevel} size={48} />
+              <CircleLevelBadge level={circleLevel} size={44} />
             </TouchableOpacity>
             <View style={styles.crestText}>
               <CircleTitle
@@ -1898,21 +1931,16 @@ function CircleScreen() {
         </View>
         )}
 
-        {/* Att göra — en lapp per medlem, mellan ringen och flödet: under
-            talen kretsen delar, ovanför det som redan hänt. Väljs någon i
-            ringen kommer hens lapp fram, som brickan. Den egna lappen öppnar
-            samma ark som lappen på Hem; de andras går bara att läsa. */}
+        {/* Vad kretsen gjorde med sina pauser — mellan ringen och flödet, för
+            samma period som ringen. Väljs någon i ringen visar den bara hens
+            (components/circle-intentions.tsx). Ersatte att göra-lapparna. */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>To do</Text>
-          <View style={styles.notesBleed}>
-            <CircleTodoNotes
-              members={members}
-              todos={todos}
-              meId={user.id}
-              selectedId={CIRCLE_RINGS_VIEW ? selectedMemberId : null}
-              onOpenMine={() => setShowMyTodos(true)}
-            />
-          </View>
+          <Text style={styles.sectionLabel}>
+            Habits{intentionWho ? ` · ${intentionWho}` : ''}
+          </Text>
+          {intentionRows && (
+            <CircleIntentions rows={sumIntentions(intentionRows, intentionUserId)} />
+          )}
         </View>
 
         {/* Activity */}
@@ -1969,17 +1997,6 @@ function CircleScreen() {
           </View>
         </View>
       </ScrollView>
-
-      {/* Den egna listan. Ändringar läggs in i kretsens lista direkt, så att
-          den egna lappen följer med utan att vänta på nästa load(). */}
-      <TodoSheet
-        visible={showMyTodos}
-        userId={user.id}
-        inCircle
-        circleCount={myCircles.length}
-        onClose={() => setShowMyTodos(false)}
-        onChanged={mine => setTodos(all => [...all.filter(t => t.user_id !== user.id), ...mine])}
-      />
 
       {/* Members */}
       {/* Stegen. Hela listan, inte bara nuvarande steg: poängen med en stege
@@ -2103,13 +2120,13 @@ function CircleScreen() {
               onPress={() => { setShowMembersModal(false); setShowSettings(true); }}
               activeOpacity={0.7}
               accessibilityRole={iAmOwner ? 'button' : 'text'}
-              accessibilityLabel={`Counts ${formatCountWindow(circle.settings)}. Rewards ${circle.settings.rewards_enabled ? 'on' : 'off'}.${iAmOwner ? ' Change settings.' : ''}`}
+              accessibilityLabel={`${formatCountRule(circle.settings)}. Rewards ${circle.settings.rewards_enabled ? 'on' : 'off'}.${iAmOwner ? ' Change settings.' : ''}`}
             >
               <View style={{ flex: 1 }}>
-                <Text style={styles.settingsRowText}>Counts {formatCountWindow(circle.settings).toLowerCase()}</Text>
+                <Text style={styles.settingsRowText}>{formatCountRule(circle.settings)}</Text>
                 <Text style={styles.settingsRowMeta}>
                   Rewards {circle.settings.rewards_enabled ? 'on' : 'off'}
-                  {circle.settings.pending ? ` · From next week: ${formatCountWindow(circle.settings.pending).toLowerCase()}` : ''}
+                  {circle.settings.pending ? ` · From next week: ${formatCountRule(circle.settings.pending, true)}` : ''}
                 </Text>
               </View>
               {iAmOwner && <FontAwesome5 name="sliders-h" size={14} color={Palette.hue} />}
@@ -2350,11 +2367,13 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   scrollContent: { padding: Spacing.xl, paddingTop: 60, paddingBottom: 72, gap: 36 },
 
   header: { gap: 6 },
-  logo: { marginBottom: Spacing.lg - 6 },
-  emptyLogo: { position: 'absolute', left: Spacing.xl },
+  // Lika hög som Hems topbar (ikonknapparna, 44) med logotypen centrerad i
+  // den, så att märket står på exakt samma ställe i alla tre flikarna.
+  logo: { height: 44, justifyContent: 'center', marginBottom: Spacing.lg - 6 },
+  emptyLogo: { position: 'absolute', left: Spacing.xl, height: 44, justifyContent: 'center' },
   title: { fontSize: 30, fontWeight: '900', color: Palette.textPrimary, letterSpacing: -0.3, flexShrink: 1 },
   // Bredvid märket: märket och chatten tar ~120 px ur raden.
-  titleCompact: { fontSize: 24 },
+  titleCompact: { fontSize: 22 },
   // Samma geometri och samma botten som veckoknappen i stats.tsx.
   //
   // Bottnen är `surface` och inte en tonad accent: i ljust läge lade den
@@ -2385,29 +2404,32 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   // Kretsens vapen: märket, namnet med LEVEL under, chatten. Namnet krymper
   // (ellips) före märket och chatten.
   crestRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  crestText: { flex: 1, minWidth: 0, gap: 2 },
+  crestText: { flex: 1, minWidth: 0, gap: 4 },
   crestLevelBtn: { alignSelf: 'flex-start' },
 
   // ── Kretsrubriken och väljaren ──
-  circleTitleBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 10, maxWidth: '100%', paddingVertical: 2 },
+  circleTitleBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 8, maxWidth: '100%' },
   // Kretsraden: kapslar som går att rulla i sidled, kant i kant med sidan
   // (negativ marginal + samma padding), så att det syns att den rullar.
-  switcherWrap: { gap: 8, marginBottom: 10 },
+  // Luft under raden (18) skiljer valet från rubriken: tätt mot varandra
+  // läste kapslarna och vapnet som en enda klump.
+  switcherWrap: { gap: 8, marginBottom: 18 },
   switcherScroll: { marginHorizontal: -Spacing.xl, flexGrow: 0 },
-  switcherRow: { gap: 8, paddingHorizontal: Spacing.xl, alignItems: 'center' },
+  switcherRow: { gap: 4, paddingHorizontal: Spacing.xl, alignItems: 'center' },
+  // De ovalda är bara text — ingen yta, ingen kant. En rad med lika många
+  // grå kapslar som kretsar var det som gjorde överdelen rörig; nu syns bara
+  // den valda som form.
   switcherPill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    height: 34, paddingHorizontal: 14, borderRadius: Radius.pill,
-    backgroundColor: Palette.ink06, maxWidth: 200,
-    borderWidth: 1.5, borderColor: 'transparent',
+    height: 32, paddingHorizontal: 14, borderRadius: Radius.pill,
+    maxWidth: 200,
   },
-  // Den valda kretsen är en grön ton med grön kant och grön text — inte
-  // ifylld. Ifylld i `hue` läste som en del av logotypen, och ifylld i
-  // accenten kändes främmande i det gröna rummet. Kanten finns (genomskinlig)
-  // också på de ovalda, så att kapseln inte ändrar storlek vid valet.
-  switcherPillOn: { backgroundColor: Palette.hueTint, borderColor: Palette.hue },
-  switcherAdd: { width: 34, paddingHorizontal: 0, justifyContent: 'center' },
-  switcherText: { fontSize: 14, fontWeight: '800', color: Palette.textSecondary, flexShrink: 1 },
+  // Den valda kretsen är en grön ton med grön text — inte ifylld och utan
+  // kant. Ifylld i `hue` läste som en del av logotypen, och ifylld i
+  // accenten kändes främmande i det gröna rummet.
+  switcherPillOn: { backgroundColor: Palette.hueTint },
+  switcherAdd: { width: 32, paddingHorizontal: 0, justifyContent: 'center', marginLeft: 4, backgroundColor: Palette.ink06 },
+  switcherText: { fontSize: 14, fontWeight: '700', color: Palette.textTertiary, flexShrink: 1 },
   // Olästa i en annan krets, eller en inbjudan bakom `+`. Innanför kapseln
   // och utan negativa mått: Android klipper barn utanför föräldern.
   switcherDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Palette.accent },
@@ -2492,7 +2514,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   section: { gap: Spacing.md },
   sectionLabel: { ...Palette.eyebrow },
   // Lapparnas rad går kant i kant; raden själv drar in sitt innehåll igen.
-  notesBleed: { marginHorizontal: -Spacing.xl },
   sectionHeadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.md },
   // ── Pottens streck ──
   // Vänsterställda som i designen: kolumnen till höger tar den andra kanten.
@@ -2626,7 +2647,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   // `lineHeight` står utskriven så att raden har samma höjd på båda
   // plattformarna. (Den var förr en term i `headerStack`s `marginTop`; sedan
   // texten flyttade bredvid emblemet är den inte det längre.)
-  levelBadge: { fontSize: 12, lineHeight: 15, fontWeight: '900', color: Palette.hue, letterSpacing: 2, flexShrink: 1 },
+  levelBadge: { fontSize: 12, lineHeight: 15, fontWeight: '900', color: Palette.hue, letterSpacing: 1.4, flexShrink: 1 },
 
   ladderHero: { alignItems: 'center', gap: 6, paddingTop: Spacing.sm, paddingBottom: Spacing.xs },
   ladderHeroName: { fontSize: 20, fontWeight: '900', color: Palette.textPrimary, letterSpacing: -0.2, textAlign: 'center' },

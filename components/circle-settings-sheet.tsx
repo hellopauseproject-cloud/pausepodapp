@@ -5,7 +5,7 @@ import {
 import { AppPalette, Radius, Spacing } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { track } from '../lib/analytics';
-import { CircleSettings, formatCountWindow, setCircleSettings } from '../lib/circles';
+import { CircleSettings, formatCountRule, formatCountValue, setCircleSettings } from '../lib/circles';
 import { CircleSettingsDraft, CircleSettingsForm } from './circle-settings-form';
 
 /**
@@ -56,7 +56,7 @@ export function CircleSettingsSheet({ visible, circleId, settings, onClose, onSa
       onSaved();
       onClose();
       if (deferred) {
-        Alert.alert('Saved', `The new hours (${formatCountWindow(draft)}) start next Monday, so this week isn’t changed halfway through.`);
+        Alert.alert('Saved', `The new time window (${formatCountValue(draft)}) starts next Monday, so this week isn’t changed halfway through.`);
       }
     } catch (e: any) {
       Alert.alert('Could not save', e.message);
@@ -80,7 +80,7 @@ export function CircleSettingsSheet({ visible, circleId, settings, onClose, onSa
             />
             {settings.pending && (
               <Text style={styles.pending}>
-                From next week: {formatCountWindow(settings.pending)}. Until then: {formatCountWindow(settings)}.
+                From next week: {formatCountRule(settings.pending, true)}. Until then: {formatCountValue(settings)}.
               </Text>
             )}
           </ScrollView>

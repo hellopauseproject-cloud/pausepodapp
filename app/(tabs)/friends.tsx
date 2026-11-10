@@ -43,7 +43,7 @@ import { isNightHours } from '../../lib/homeMode';
 import { enablePushNotifications } from '../../lib/notifications';
 import { startSleep } from '../../lib/sleep';
 import { supabase } from '../../lib/supabase';
-import { liveStoryFilter, storyTimeLeft, unopenedResponsesQuery } from '../../lib/supportStories';
+import { liveStoryFilter, recentSupportQuery, storyTimeLeft, unopenedResponsesQuery } from '../../lib/supportStories';
 import { fetchUnseenThanks, markThanksSeen, SupportThanks } from '../../lib/supportThanks';
 import { fetchSealedSupport, SealedSupport } from '../../lib/supportSealed';
 import { openPauseStart } from '../../lib/pauseFlow';
@@ -98,13 +98,21 @@ const SUPPORT_TYPE_LABELS: Record<string, string> = {
 };
 
 /**
- * Alla 24 synliga på en gång, med de tre vanligaste först. Att gömma resten
+ * Alla 23 synliga på en gång, med de tre vanligaste först. Att gömma resten
  * bakom "Something else…" sparade ingen plats värd namnet och lade ett tryck
  * mellan användaren och det hen letade efter.
  */
+/**
+ * Toner som inte längre erbjuds men står kvar i SUPPORT_TYPE_LABELS, så att
+ * en gammal förfrågan fortfarande visar sin etikett. *Pep* togs bort på
+ * begäran (november 2026) — *Pep talk* och *Cheering* bär samma sak.
+ */
+const RETIRED_TONE_IDS = ['pepp'];
+
 const ALL_TONE_IDS = [
   ...QUICK_TONE_IDS,
-  ...Object.keys(SUPPORT_TYPE_LABELS).filter(id => !QUICK_TONE_IDS.includes(id)),
+  ...Object.keys(SUPPORT_TYPE_LABELS).filter(id =>
+    !QUICK_TONE_IDS.includes(id) && !RETIRED_TONE_IDS.includes(id)),
 ];
 
 
@@ -1346,6 +1354,7 @@ function FriendsScreen() {
   // kuvert (app/support-arrived.tsx), och kortet är fliken huvudsak när det
   // finns något. Flikens egen badge i (tabs)/_layout.tsx räknar in dem.
   const [inbox, setInbox] = useState<{ count: number; senderName: string; senderAvatarUrl: string | null } | null>(null);
+  const [recentSupport, setRecentSupport] = useState(0);
 
   // Vänradernas tryck, stabila så att `FriendRow`s memo håller.
   const openFriendProfile = useCallback((friend: Friend, statusText: string | null) => {
@@ -1378,7 +1387,7 @@ function FriendsScreen() {
   // Dela en punkt från listan som story. Två steg: vad, sedan i vilken ton.
   const [storySheet, setStorySheet] = useState(false);
   // Tangentbordets höjd, mätt för hand — samma lösning som circle-chat.tsx
-  // och todo-sheet.tsx. KeyboardAvoidingView gjorde ingenting på Android
+  // och circle-reward-sheet.tsx. KeyboardAvoidingView gjorde ingenting på Android
   // (`edgeToEdgeEnabled` stänger av `adjustResize`), så *Or write something
   // else…* låg under tangentbordet. Lägg inte tillbaka en KAV ovanpå, då
   // räknas tangentbordet två gånger på iOS.
@@ -1426,14 +1435,9 @@ function FriendsScreen() {
     setStoryTypes([]);
     setStoryRecipients(new Set());
     setStorySheet(true);
-    if (!user) return;
-    const { data } = await supabase
-      .from('wishlist_items')
-      .select('id, text')
-      .eq('user_id', user.id)
-      .is('done_at', null)
-      .order('created_at', { ascending: false });
-    setStoryItems(data ?? []);
+    // Gruppen *On your list* läste att göra-listan, som är riven (november
+    // 2026). Listan läses inte längre, så gruppen står aldrig.
+    setStoryItems([]);
   };
 
   const handlePublishStory = async () => {
@@ -1659,6 +1663,10 @@ function FriendsScreen() {
         });
       };
       checkPending();
+      // Klockan i rubrikraden (app/support-history.tsx) syns bara när det
+      // finns något öppnat de senaste 24 timmarna.
+      recentSupportQuery(user.id, 'id', { count: 'exact', head: true })
+        .then(({ count }) => setRecentSupport(count ?? 0));
     }, [user?.id])
   );
 
@@ -1882,6 +1890,17 @@ function FriendsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <PausePodLogo />
+        {recentSupport > 0 && (
+          <TouchableOpacity
+            style={styles.historyBtn}
+            onPress={() => router.push('/support-history' as never)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Recent support, the last 24 hours"
+          >
+            <FontAwesome5 name="history" size={16} color={Palette.hue} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Stöd som väntar. Kortet är kuvertet i liten skala och leder till
@@ -1999,7 +2018,7 @@ function FriendsScreen() {
 
       {/* Dela en punkt som story — steg 1 vad, steg 2 i vilken ton */}
       {/* Genomskinliga systemfält, så att tangentbordets höjd och modalens
-          koordinater mäts mot samma fönster — samma som todo-sheet.tsx. */}
+          koordinater mäts mot samma fönster — samma som circle-reward-sheet.tsx. */}
       <Modal
         visible={storySheet}
         transparent
@@ -2278,7 +2297,15 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   centered: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
 
   // Header
-  header: { gap: Spacing.lg },
+  // Lika hög som Hems topbar (ikonknapparna, 44) med logotypen centrerad i
+  // den, så att märket står på exakt samma ställe i alla tre flikarna.
+  header: { height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  // Samma kvadrat som Kretsens chattknapp, i rummets hue.
+  historyBtn: {
+    width: 44, height: 44, borderRadius: Radius.md,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Palette.surface, borderWidth: 1, borderColor: alpha(Palette.hue, 0.3),
+  },
 
   // Dela-en-punkt-lakanet
   storyOverlay: { flex: 1, backgroundColor: Palette.scrim, justifyContent: 'flex-end' },

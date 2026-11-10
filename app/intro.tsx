@@ -9,7 +9,8 @@ import { StepSocial } from '../components/intro/step-social';
 import { StepWelcome } from '../components/intro/step-welcome';
 import { AppPalette } from '../constants/appTheme';
 import { useAuth } from '../contexts/AuthContext';
-import { usePalette } from '../contexts/ThemeContext';
+import { roomShell, ScreenBackground } from '../components/screen-background';
+import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { track } from '../lib/analytics';
 import { clearIntroDeferred, deferIntro } from '../lib/introPrefs';
 import { supabase } from '../lib/supabase';
@@ -73,7 +74,21 @@ const STEP_NAMES = ['welcome', 'profile', 'social'] as const;
  * vet att lådan finns hittar aldrig dit, och (i v7) tummarnas grind står ingen
  * annanstans innan telefonen ligger i en stängd låda.
  */
-export default function IntroScreen() {
+// Introduktionen står i Pause-rummet, det blå: det är appens första intryck,
+// och det ska vara samma rum som PAUSE-knappen man möter efteråt. Den stod
+// förr utanför alla rum, på basens plommon.
+export default function IntroRoom() {
+  return (
+    <RoomProvider room="pause">
+      <View style={roomShell}>
+        <ScreenBackground room="pause" />
+        <IntroScreen />
+      </View>
+    </RoomProvider>
+  );
+}
+
+function IntroScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const insets = useSafeAreaInsets();
@@ -318,9 +333,10 @@ export default function IntroScreen() {
 }
 
 const makeStyles = (Palette: AppPalette) => StyleSheet.create({
+  // Botten ritas av <ScreenBackground> i skalet ovan.
   container: {
     flex: 1,
-    backgroundColor: Palette.bg,
+    backgroundColor: 'transparent',
   },
   dots: {
     flexDirection: 'row',

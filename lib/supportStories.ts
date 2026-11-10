@@ -65,3 +65,29 @@ export function unopenedResponsesQuery<Columns extends string>(
     .eq('support_stories.user_id', userId)
     .is('delivered_at', null);
 }
+
+/**
+ * Hur länge ett öppnat stödsvar går att se igen (app/support-history.tsx).
+ * Räknas från när det **öppnades** (`delivered_at`), inte när det skickades —
+ * ett förseglat svar kan ha väntat i dagar. Samma 24 timmar som förfrågan.
+ */
+export const SUPPORT_HISTORY_MS = STORY_LIFETIME_MS;
+
+/**
+ * Öppnade svar på egna förfrågningar, de senaste 24 timmarna. Inget raderas:
+ * raden filtreras bort vid läsning, samma linje som `liveStoryFilter` (det
+ * finns ingen cron i projektet). Att `delivered_at` inte flyttas när ett svar
+ * ses igen sköts av triggern i supabase/support_history.sql.
+ */
+export function recentSupportQuery<Columns extends string>(
+  userId: string,
+  columns: Columns,
+  options?: { count?: 'exact'; head?: boolean },
+) {
+  const since = new Date(Date.now() - SUPPORT_HISTORY_MS).toISOString();
+  return supabase
+    .from('support_responses')
+    .select(`${columns}, support_stories!inner(user_id)` as `${Columns}, support_stories!inner(user_id)`, options)
+    .eq('support_stories.user_id', userId)
+    .gte('delivered_at', since);
+}

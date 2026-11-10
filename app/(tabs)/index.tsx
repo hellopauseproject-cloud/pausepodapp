@@ -6,15 +6,15 @@ import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Animated, Easing, Image, Keyboard, Modal, Platform, Pressable, StyleSheet, Text,
+  Alert, Animated, Easing, Image, Modal, Pressable, StyleSheet, Text,
   TouchableOpacity, useWindowDimensions, View,
 } from 'react-native';
 import Reanimated, {
   Easing as REasing, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming,
 } from 'react-native-reanimated';
 import { CelebrationBurst } from '../../components/celebration-burst';
-import { DurationWheel } from '../../components/duration-wheel';
-import { HabitGoalsEditor, HabitPicker } from '../../components/habit-goals-editor';
+import { DailyGoalCard } from '../../components/daily-goal-card';
+import { WEEK_TALLY_BOTTOM, WeekTally } from '../../components/week-tally';
 import { HoldToStartButton } from '../../components/hold-to-start-button';
 import { LiquidBars } from '../../components/liquid-bars';
 import { ProgressArc } from '../../components/progress-arc';
@@ -25,7 +25,6 @@ import { PauseButtonFace } from '../../components/pause-button-face';
 import { PauseInviteRow } from '../../components/pause-invite-row';
 import { PauseTagSheet } from '../../components/pause-tag-sheet';
 import { roomShell, ScreenBackground } from '../../components/screen-background';
-import { NoteRect, TodoPostIt, TodoSheet } from '../../components/todo-sheet';
 import { AppPalette, Radius, Spacing } from '../../constants/appTheme';
 import { useAuth } from '../../contexts/AuthContext';
 import { RoomProvider, usePalette } from '../../contexts/ThemeContext';
@@ -43,16 +42,12 @@ import { NightMoon } from '../../components/night-moon';
 import { SegmentedPill } from '../../components/segmented-pill';
 import { supabase } from '../../lib/supabase';
 import { setCachedMyProfile } from '../../lib/myProfile';
-import { getTodos, Todo } from '../../lib/todos';
-import { getHabitProgress, HabitGoal, habitsChanged, setHabitGoals } from '../../lib/habits';
-import { Category, getAllCategories, getSelectedCategories } from '../pauseLogger';
 import { countReadyEnvelopes } from '../../lib/supportSealed';
 import type { DailyGoalProgress } from '../../types/database';
 
-// Att göra-listan är tillbaka, men som en lapp som sticker upp i nedre
-// vänstra hörnet i stället för lakanet som tog hela botten (se
-// components/todo-sheet.tsx). Den ligger under PAUSE-knappens golv, så
-// heronens räkning nedan behöver inte veta om den.
+// Veckans taggar står i nedre vänstra hörnet, där att göra-lappen satt
+// (components/week-tally.tsx). Två rader ryms under PAUSE-knappens golv; en
+// tredje lyfter blocket (`cornerLift`).
 
 // ── Taggkortet efter en paus ──────────────────────────────────────────────
 // En ensam paus slutar här (app/pausesummary.tsx lämnar en lapp och byter sig
@@ -270,37 +265,9 @@ function HomeScreen() {
   // Bara till för uppmaningen under rubriken: den som är med i en krets får
   // samma uppmaning på kretsfliken, och två av dem hade varit en för många.
   const [inCircle, setInCircle] = useState(false);
-  const [circleCount, setCircleCount] = useState(0);
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [goalIndex, setGoalIndex] = useState(() => nearestGoalIndex(3600));
   const [savingGoal, setSavingGoal] = useState(false);
-  // Vanorna i samma ruta (lib/habits.ts). `savedHabits` är det som låg i
-  // basen när rutan öppnades, så att knappen bara skriver dem när något
-  // ändrats; `habitDays` är veckans räkning för de sparade.
-  const [habitDraft, setHabitDraft] = useState<HabitGoal[]>([]);
-  const [savedHabits, setSavedHabits] = useState<HabitGoal[]>([]);
-  const [habitDays, setHabitDays] = useState<Record<string, number>>({});
-  const [habitCats, setHabitCats] = useState<Category[]>([]);
-  // Väljaren byter rutans innehåll, se `HabitPicker`.
-  const [habitPicking, setHabitPicking] = useState(false);
-  // *Your own* har textfält, och rutan står mitt på skärmen där tangentbordet
-  // annars lägger sig över den. Höjden ur `Keyboard`-händelserna, som
-  // att göra-arket: med `edgeToEdgeEnabled` gör KeyboardAvoidingView
-  // ingenting på Android.
-  const [goalKeyboardH, setGoalKeyboardH] = useState(0);
-  useEffect(() => {
-    if (!showGoalModal) return;
-    const show = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      e => setGoalKeyboardH(e.endCoordinates.height),
-    );
-    const hide = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setGoalKeyboardH(0),
-    );
-    return () => { show.remove(); hide.remove(); setGoalKeyboardH(0); };
-  }, [showGoalModal]);
-
   const { height: windowH, width: windowW } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const topPad = Math.max(TOP_PAD, insets.top + 8);
@@ -346,7 +313,6 @@ function HomeScreen() {
     const read = async (): Promise<DailyGoalProgress | null> => {
       const [d, circles] = await Promise.all([getDailyGoalProgress(), getMyCircles(user.id)]);
       setInCircle(circles.length > 0);
-      setCircleCount(circles.length);
       setDaily(d);
       return d;
     };
@@ -384,16 +350,13 @@ function HomeScreen() {
     return () => clearInterval(id);
   }, []));
 
-  // Den egna listan, för lappen. Arket hämtar själv när det öppnas och
-  // skickar tillbaka varje ändring, så de två visar alltid samma lista.
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [showTodos, setShowTodos] = useState(false);
-  // Lappens ruta vid trycket — arket växer fram ur den.
-  const [todoOrigin, setTodoOrigin] = useState<NoteRect | null>(null);
-  useFocusEffect(useCallback(() => {
-    if (!user?.id) return;
-    getTodos(user.id).then(setTodos).catch(() => {});
-  }, [user?.id]));
+  // Veckans taggar hämtar om sin räkning när det här byts — efter att en paus
+  // taggats, eller när pausens rad landat (en intention vald före pausen).
+  const [tallyKey, setTallyKey] = useState(0);
+  // Två rader ryms under PAUSE-knappens golv; en tredje sticker upp, och så
+  // mycket lyfts blocket (`cornerLift`, nedan).
+  const [tallyH, setTallyH] = useState(0);
+  const onTallyHeight = useCallback((h: number) => setTallyH(prev => (Math.abs(prev - h) > 1 ? h : prev)), []);
 
   /**
    * Vägen tillbaka in i introduktionen för den som sköt upp den. Läses vid
@@ -491,6 +454,7 @@ function HomeScreen() {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => {
       loadDaily().then(d => celebrate(from, d ?? null)).catch(() => celebrate(null, null));
+      setTallyKey(k => k + 1);
     }, DAILY_REFRESH_MS);
     if (!p.alreadyTagged && p.durationSeconds >= TAG_MIN_SECONDS) setTag(p);
   }, [bellPlayer, loadDaily, celebrate]));
@@ -502,6 +466,7 @@ function HomeScreen() {
     tagIn.value = reduceMotion ? 1 : withTiming(1, { duration: TAG_SLIDE_MS, easing: TAG_EASING });
   }, [tag, reduceMotion, tagIn]);
   const closeTag = useCallback(() => {
+    setTallyKey(k => k + 1);
     if (reduceMotion) { tagIn.value = 0; setTag(null); return; }
     tagIn.value = withTiming(0, { duration: TAG_SLIDE_MS * 0.7, easing: TAG_EASING });
     setTimeout(() => setTag(null), TAG_SLIDE_MS * 0.7);
@@ -583,7 +548,13 @@ function HomeScreen() {
   // Inbjudningsraden ovanför PAUSE har fast höjd och står bara i dagläge —
   // natten är privat och har ingen inbjudan.
   const showInviteRow = !isNight && !!user?.id;
-  const heroExtras = MODE_PILL_H
+  // Det vanornas hörn sticker upp över golvet (`MIN_BOTTOM_GAP` + `BOTTOM_PAD`).
+  // Står med även medan taggkortet är uppe, så att blocket inte hoppar när
+  // hörnet döljs. Ingår i extras och blir blockets `paddingBottom`.
+  const cornerLift = isNight
+    ? 0
+    : Math.max(0, WEEK_TALLY_BOTTOM + tallyH - MIN_BOTTOM_GAP - BOTTOM_PAD);
+  const heroExtras = cornerLift + MODE_PILL_H
     + (isNight ? NIGHT_TITLE_H : goalMet ? GOAL_MET_H : 0)
     + (introDeferred ? SET_GOAL_BTN_H : 0)
     + (envelopesReady > 0 && !isNight ? SET_GOAL_BTN_H : 0);
@@ -643,7 +614,7 @@ function HomeScreen() {
     : topbarBottom + GLOBAL_LINE_GAP;
   // Inbjudningsraden står mellan målraden och knappen, så den räknas bort här
   // också — annars lyfts heron raden högre än den behöver.
-  const readoutBottom = blockTop + blockH - PAUSE_BTN_H - hero.gap;
+  const readoutBottom = blockTop + blockH - cornerLift - PAUSE_BTN_H - hero.gap;
   const roomAbove = Math.max(0, blockTop - centerY - MIN_TOP_GAP);
   const tagTop = frameH - tagSheetH;
   const tagLift = tag && tagSheetH ? clamp(readoutBottom + TAG_CLEARANCE - tagTop, 0, roomAbove) : 0;
@@ -661,22 +632,7 @@ function HomeScreen() {
   // siffran som ändrar det. Utan mål än öppnar ratten på en timme.
   const openGoalModal = () => {
     setGoalIndex(nearestGoalIndex(daily?.daily_target_seconds ?? 3600));
-    setHabitPicking(false);
     setShowGoalModal(true);
-    // Vanorna hämtas när rutan öppnas, inte vid fokus: de syns bara här.
-    // Valbara är de intentioner pausskärmen erbjuder, plus de som redan är
-    // en vana även om de valts bort i profilen sedan — annars saknade raden
-    // sin emoji.
-    Promise.all([getHabitProgress(), getSelectedCategories(), getAllCategories()])
-      .then(([progress, offered, all]) => {
-        const goals = progress.map(({ category_id, label, times_per_week }) => ({ category_id, label, times_per_week }));
-        setSavedHabits(goals);
-        setHabitDraft(goals);
-        setHabitDays(Object.fromEntries(progress.map(p => [p.category_id, p.done_this_week])));
-        const extra = all.filter(c => goals.some(g => g.category_id === c.id) && !offered.some(o => o.id === c.id));
-        setHabitCats([...offered, ...extra]);
-      })
-      .catch(() => {});
   };
 
   const handleSaveGoal = async () => {
@@ -686,7 +642,6 @@ function HomeScreen() {
       // Samma RPC som Kretsen sparar med. Den kräver ingen krets: talet bor på
       // profilen, och kretsloggen skrivs bara om det finns en krets att logga i.
       await setDailyGoal(GOAL_OPTIONS[goalIndex]);
-      if (habitsChanged(habitDraft, savedHabits)) await setHabitGoals(habitDraft);
       setShowGoalModal(false);
       loadDaily();
     } catch (e: any) {
@@ -789,7 +744,7 @@ function HomeScreen() {
           frameH
             ? { height: hero.area, justifyContent: 'center' }
             : { flex: 1 },
-          { gap: hero.gap },
+          { gap: hero.gap, paddingBottom: cornerLift },
           heroLiftStyle,
         ]}
         // Bara överkanten läses: höjden sätts av räkningen ovan, så att
@@ -1114,74 +1069,30 @@ function HomeScreen() {
         visible={showGoalModal}
         transparent
         animationType="fade"
-        onRequestClose={() => (habitPicking ? setHabitPicking(false) : setShowGoalModal(false))}
+        onRequestClose={() => setShowGoalModal(false)}
       >
-        <View style={[styles.backdrop, goalKeyboardH > 0 && { paddingBottom: goalKeyboardH + Spacing.lg }]}>
+        <View style={styles.backdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowGoalModal(false)} />
-          <View style={styles.card}>
-            {habitPicking ? (
-              <HabitPicker
-                categories={habitCats}
-                habits={habitDraft}
-                onPick={h => { setHabitDraft(d => [...d, h]); setHabitPicking(false); }}
-                onBack={() => setHabitPicking(false)}
-                onCreated={cat => setHabitCats(c => [...c, cat])}
-              />
-            ) : (<>
-            <Text style={styles.cardTitle}>Your goals</Text>
-
-            {/* Tid per dag, vanor per vecka — orden *a day* och *days a
-                week* bär skillnaden. Ratten är oförändrad. */}
-            <View style={styles.goalHead}>
-              <Text style={styles.goalEyebrow}>TIME</Text>
-              <Text style={styles.goalNote}>a day</Text>
-            </View>
-            <DurationWheel index={goalIndex} onIndexChange={setGoalIndex} />
-
-            <View style={styles.goalDivider} />
-            <HabitGoalsEditor
-              habits={habitDraft}
-              onChange={setHabitDraft}
-              onAdd={() => setHabitPicking(true)}
-              categories={habitCats}
-              progress={habitDays}
-            />
-
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleSaveGoal} disabled={savingGoal}>
-              <Text style={styles.primaryBtnText}>{savingGoal ? 'Saving…' : 'Save goals'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowGoalModal(false)} style={styles.cancelLink}>
-              <Text style={styles.cancelLinkText}>Cancel</Text>
-            </TouchableOpacity>
-            </>)}
-          </View>
+          {/* Bara tiden. Vanemålen som stod här är borta — veckans taggar
+              står i stället i hörnet (components/week-tally.tsx). */}
+          <DailyGoalCard
+            goalIndex={goalIndex}
+            onIndexChange={setGoalIndex}
+            saving={savingGoal}
+            onSave={handleSaveGoal}
+            onCancel={() => setShowGoalModal(false)}
+          />
         </View>
       </Modal>
     </View>
 
-      {/* Lappen. Utanför containern av samma skäl som taggkortet, och borta
-          medan kortet står uppe — det ligger över samma hörn. Borta i
-          nattläge också: att göra hör till dagen, och nattsidan är bara
-          månen och SLEEP. */}
+      {/* Veckans taggar. Utanför containern av samma skäl som taggkortet,
+          och borta medan kortet står uppe — det ligger över samma hörn. Borta
+          i nattläge också: taggarna hör till dagens pauser. */}
       {!tag && !isNight && user?.id && (
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: fadeAnim }]} pointerEvents="box-none">
-          <TodoPostIt
-            todos={todos}
-            lifted={showTodos}
-            onPress={from => { setTodoOrigin(from); setShowTodos(true); }}
-          />
+          <WeekTally userId={user.id} refreshKey={tallyKey} onHeight={onTallyHeight} />
         </Animated.View>
-      )}
-      {user?.id && (
-        <TodoSheet
-          visible={showTodos}
-          userId={user.id}
-          inCircle={inCircle}
-          circleCount={circleCount}
-          origin={todoOrigin}
-          onClose={() => setShowTodos(false)}
-          onChanged={setTodos}
-        />
       )}
 
       {/* Taggkortet efter en ensam paus. Utanför containern, kant i kant mot
@@ -1295,20 +1206,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     flex: 1, backgroundColor: Palette.scrim,
     alignItems: 'center', justifyContent: 'center', padding: Spacing.xl,
   },
-  card: {
-    width: '100%', backgroundColor: Palette.modalSurface, borderRadius: Radius.xl,
-    padding: Spacing.xl, gap: Spacing.md,
-  },
-  cardTitle: { fontSize: 18, fontWeight: '700', color: Palette.textPrimary, textAlign: 'center' },
-  // Samma rubrikrad som vanornas (components/habit-goals-editor.tsx).
-  goalHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: -Spacing.xs },
-  goalEyebrow: { ...Palette.eyebrow },
-  goalNote: { fontSize: 12, lineHeight: 16, color: Palette.textTertiary },
-  goalDivider: { height: StyleSheet.hairlineWidth, backgroundColor: Palette.ink10 },
-  primaryBtn: { backgroundColor: Palette.accent, paddingVertical: 14, borderRadius: Radius.pill, alignItems: 'center' },
-  primaryBtnText: { color: Palette.onAccent, fontSize: 15, fontWeight: '700' },
-  cancelLink: { alignItems: 'center', paddingVertical: 6 },
-  cancelLinkText: { color: Palette.textTertiary, fontSize: 14 },
   eyebrow: {
     ...Palette.eyebrow,
     textAlign: 'center',

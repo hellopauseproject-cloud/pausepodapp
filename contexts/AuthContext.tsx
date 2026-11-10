@@ -1,6 +1,8 @@
 import { Session, User } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useState } from 'react';
 import { setAnalyticsUser, track } from '../lib/analytics';
+import { syncIntentions } from '../app/pauseLogger';
+import { clearLocalAccountData } from '../lib/localAccountData';
 import { clearPushToken } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
 import { isUsernameAvailable, USERNAME_TAKEN_MESSAGE } from '../lib/username';
@@ -71,6 +73,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // loggar in på samma telefon. Se lib/analytics.ts.
   useEffect(() => {
     setAnalyticsUser(user?.id ?? null);
+  }, [user?.id]);
+
+  // Intentionerna bor i Supabase och cachas i filer på telefonen. Filerna
+  // rivs vid utloggning, så de hämtas ner här (app/pauseLogger.ts).
+  useEffect(() => {
+    if (user?.id) syncIntentions(user.id);
   }, [user?.id]);
 
   // Har introduktionen körts? Styr grinden i app/_layout.tsx. `null` betyder
@@ -225,6 +233,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn('Sign out error:', e);
     } finally {
+      // Före nollningen, så att ingen skärm hinner läsa den gamla profilen
+      // åt nästa konto. Se lib/localAccountData.ts.
+      await clearLocalAccountData();
       setSession(null);
       setUser(null);
     }
