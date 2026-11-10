@@ -5,12 +5,17 @@ import { Animated, Easing, Image, ScrollView, StyleSheet, Text, TouchableOpacity
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
+import { closeSupportViewer } from '../lib/supportOpen';
+import { PauseButtonFace } from '../components/pause-button-face';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { LETTER_PAPER } from '../components/support-envelope';
 import { useHand } from '../lib/handFont';
 import { SupportHeartButton } from '../components/support-heart-button';
+
+// Samma höjd som PAUSE på Hem.
+const PAUSE_BTN_H = 58;
 
 /**
  * Hör till **friends-rummet**. Rummet följer ärendet och inte filträdet — se
@@ -91,7 +96,7 @@ function TextMessageScreen() {
 
   const handleDecline = async () => {
     await markDelivered();
-    router.replace('/(tabs)');
+    closeSupportViewer();
   };
 
   const firstName = (senderName ?? 'A friend').split(' ')[0];
@@ -142,8 +147,12 @@ function TextMessageScreen() {
         )}
         <Animated.View style={{ opacity: acceptOpacity, transform: [{ translateY }, { translateX }, { scale }] }}>
           <TouchableOpacity style={styles.acceptBtn} onPress={handleAccept} activeOpacity={0.85} disabled={isSending}>
-            <FontAwesome5 name="pause" size={13} color={Palette.onAccent} />
-            <Text style={styles.acceptText}>I'll take a pause</Text>
+            <PauseButtonFace radius={PAUSE_BTN_H / 2} />
+            <View style={styles.pauseGlyph}>
+              <View style={styles.pauseGlyphBar} />
+              <View style={styles.pauseGlyphBar} />
+            </View>
+            <Text style={styles.acceptText}>I'LL TAKE A PAUSE</Text>
           </TouchableOpacity>
         </Animated.View>
         <Animated.View style={{ opacity: declineOpacity }}>
@@ -206,22 +215,30 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     paddingTop: 8,
     gap: 4,
   },
+  // Samma knapp som PAUSE på Hem (app/(tabs)/index.tsx): materialet, glöden,
+  // pausens två streck och displayversaler.
   acceptBtn: {
     backgroundColor: Palette.accent,
-    paddingVertical: 16,
-    borderRadius: Radius.pill,
+    height: PAUSE_BTN_H,
+    borderRadius: PAUSE_BTN_H / 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
     marginBottom: 4,
-    ...Palette.cardShadow,
+    shadowColor: Palette.accent,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 22,
+    elevation: 12,
   },
+  pauseGlyph: { flexDirection: 'row', gap: 6 },
+  pauseGlyphBar: { width: 6, height: 18, borderRadius: 3, backgroundColor: Palette.onAccent },
   acceptText: {
     color: Palette.onAccent,
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: 2,
   },
   declineBtn: {
     paddingVertical: 14,

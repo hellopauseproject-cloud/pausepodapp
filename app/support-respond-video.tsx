@@ -16,6 +16,16 @@ import { uploadSupportMedia } from '../lib/supportMedia';
 import { AppPalette, alpha } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 
+// Kameran spelar annars in i telefonens förval — 1080p eller 4K på många
+// Android-telefoner — och 30 s blev större än Storage tar emot (413,
+// EntityTooLarge). 720p i 2,5 Mbit/s ger ~10 MB för en hel inspelning.
+// iOS läser bitraten bara när en codec anges i recordAsync, därav 'avc1'.
+const VIDEO_QUALITY = '720p';
+const VIDEO_BITRATE = 2_500_000;
+// Skyddsnät om en telefon ignorerar bitraten: inspelningen stoppas i stället
+// för att landa som ett fel först vid Send.
+const VIDEO_MAX_BYTES = 40 * 1024 * 1024;
+
 const RING_DOTS = 30;
 const RING_R = 50;
 const DOT_D = 6;
@@ -167,7 +177,9 @@ export default function SupportRespondVideoScreen() {
       }
     }, 1000);
     try {
-      const result = await cameraRef.current.recordAsync({ maxDuration: 30 });
+      const result = await cameraRef.current.recordAsync({
+        maxDuration: 30, maxFileSize: VIDEO_MAX_BYTES, codec: 'avc1',
+      });
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       if (result?.uri) {
         setRecordedUri(result.uri);
@@ -205,7 +217,10 @@ export default function SupportRespondVideoScreen() {
       setPhase('sent');
       setTimeout(() => router.back(), sealed ? SEALED_SEND_MS : 900);
     } catch (e: any) {
-      setErrorMsg('Upload error: ' + (e?.message ?? JSON.stringify(e)));
+      const msg: string = e?.message ?? JSON.stringify(e);
+      setErrorMsg(/413|EntityTooLarge/.test(msg)
+        ? 'The video is too large to send. Try a shorter one.'
+        : 'Upload error: ' + msg);
       setPhase('reviewing');
     }
   };
@@ -243,7 +258,9 @@ export default function SupportRespondVideoScreen() {
       )}
 
       {(phase === 'preview' || phase === 'recording') ? (
-        <CameraView ref={cameraRef} style={st.camera} facing={facing} mode="video" />
+        <CameraView ref={cameraRef} style={st.camera} facing={facing} mode="video"
+          videoQuality={VIDEO_QUALITY} videoBitrate={VIDEO_BITRATE}
+        />
       ) : phase === 'reviewing' && recordedUri ? (
         <View style={st.camera}>
           <VideoView style={StyleSheet.absoluteFill} player={player} nativeControls={false} />

@@ -18,7 +18,7 @@
 -- `get_sealed_support()`, som bara lämnar ut vem och när.
 --
 -- **Upplåsningen sker när pausen sparas**, av en trigger på pause_sessions:
--- minst `support_unlock_min_seconds()` (3 min), `kind = 'pause'` (en natt
+-- minst `support_unlock_min_seconds()` (2 min, var 3 och sänktes på begäran i november 2026), `kind = 'pause'` (en natt
 -- räknas inte), och slutad efter att svaret skickades. Ingen notis när det
 -- låses upp: den som just pausat står redan i appen, och Hem säger
 -- *Your envelope is ready*.
@@ -31,7 +31,7 @@ alter table public.support_responses
   add column if not exists unlocked_at timestamptz;
 
 create or replace function public.support_unlock_min_seconds()
-returns int language sql immutable as $$ select 180 $$;
+returns int language sql immutable as $$ select 120 $$;
 
 -- Restriktiv: läggs med AND ovanpå den befintliga SELECT-policyn (som
 -- skapades utanför repot) utan att någon behöver veta hur den ser ut.

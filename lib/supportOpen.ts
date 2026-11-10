@@ -14,6 +14,17 @@ export type OpenableSupport = {
 };
 
 /**
+ * Stänger en visningsskärm: tillbaka dit man kom ifrån — kuvertraden, som
+ * då visar det som är kvar, eller historiken. Förr gick text och foto till
+ * Hem och röst och video till Support-fliken, oavsett var man kom ifrån, så
+ * med fem svar som väntade fick man gå tillbaka och öppna kuvertet fem gånger.
+ */
+export function closeSupportViewer() {
+  if (router.canGoBack()) router.back();
+  else router.replace('/(tabs)/friends' as never);
+}
+
+/**
  * Till rätt visningsskärm för ett stödsvar. Delas av kuvertet
  * (app/support-arrived.tsx, `replace`: kuvertet ska inte gå att backa till)
  * och historiken (app/support-history.tsx, `push`), så att de två aldrig

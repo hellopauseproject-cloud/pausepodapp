@@ -1,10 +1,16 @@
 import { supabase } from './supabase';
-import { unopenedResponsesQuery } from './supportStories';
 
 /**
  * Stöd som öppnas efter en paus. Schemat och skälen står i
  * [supabase/support_sealed.sql](../supabase/support_sealed.sql).
  */
+
+/**
+ * Hur lång pausen måste vara för att öppna ett förseglat kuvert, i minuter.
+ * Speglar `support_unlock_min_seconds()` (120 s) i supabase/support_sealed.sql
+ * — ändras det ena ska det andra följa med, annars lovar kuvertet fel tid.
+ */
+export const SUPPORT_UNLOCK_MIN_MINUTES = 2;
 
 export type SealedSupport = {
   responseId: string;
@@ -25,15 +31,4 @@ export async function fetchSealedSupport(): Promise<SealedSupport[]> {
     username: r.username ?? 'A friend',
     avatarUrl: r.avatar_url ?? null,
   }));
-}
-
-/**
- * Hur många förseglade svar som låsts upp av en paus men inte öppnats än —
- * *Your envelope is ready* på Hem. Noll om SQL:en inte körts.
- */
-export async function countReadyEnvelopes(userId: string): Promise<number> {
-  const { count, error } = await unopenedResponsesQuery(userId, 'id', { count: 'exact', head: true })
-    .eq('opens_after_pause', true)
-    .not('unlocked_at', 'is', null);
-  return error ? 0 : (count ?? 0);
 }

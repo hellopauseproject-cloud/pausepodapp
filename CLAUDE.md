@@ -1261,8 +1261,24 @@ way!*, ett kuvert som guppar lugnt med ett hjärta som sigill, och
 viker upp fliken, brevet glider ut (med fotot, textens början, eller
 sortens ikon på), och tonar över i samma visningsskärmar som förut.
 
-- **Det äldsta oöppnade svaret öppnas först**, oavsett sort; *N more
-  waiting* står under kuvertet. Kortet i fliken namnger däremot det senaste.
+- **Väntar flera är kuverten en rad man sveper mellan** (november 2026, på
+  begäran), det äldsta först. Det i mitten står fullt; grannarna krymper,
+  sänks, tonas och lutar åt det håll de är på väg, allt räknat ur
+  rullningen på UI-tråden. Prickarna under sträcks ut för det i mitten,
+  raden *From Anna · A voice message* byts med det, och varje byte ger ett
+  lätt knäpp. Ett tryck på en granne sveper dit; ett tryck på det i mitten
+  (eller *Open*) öppnar det, och grannarna tonar bort. Kortet i fliken
+  namnger däremot det senaste.
+- **Öppningen börjar med att sigillet bryts:** hjärtat sväller, spricker
+  mitt itu med ett hårt knäpp, och halvorna faller isär medan fliken viker
+  sig upp. Sedan glider brevet ut och växer mot läsaren innan
+  visningsskärmen tonar fram. Allt hoppas över med reducerad rörelse.
+- **Man kommer tillbaka till raden.** Visningsskärmen öppnas med `push` och
+  stängs med `closeSupportViewer` (lib/supportOpen.ts), som går tillbaka dit
+  man kom ifrån — raden, som då visar det som är kvar, eller historiken.
+  Är raden tom går den själv vidare tillbaka. Förr gick text och foto till
+  Hem och röst och video till Support-fliken, så fem väntande svar betydde
+  fem vändor.
 - **Svaret räknas som öppnat i visningsskärmen, inte i kuvertet.** *Later*
   lämnar det oöppnat med brickan kvar.
 - Ett tryck på notisen *Anna sent you support* går rakt till kuvertet.
@@ -1290,13 +1306,15 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
   *Send a heart back* står på alla fyra visningsskärmarna
   ([components/support-heart-button.tsx](components/support-heart-button.tsx)),
   i `dangerSoft` som pausens hjärta, och tömmer sig vid ett andra tryck så
-  länge avsändaren inte sett det. Avsändaren får det **en gång**, som ett
-  rosa kort överst i Support-fliken (*Anna sent you a heart · For your
-  support with …*); raderna markeras sedda när de hämtats och kortet står
-  kvar tills fliken lämnas. Så länge förfrågan står kvar bär cirkeln ett
-  hjärta i stället för bocken. Två kolumner på `support_responses`
-  (`thanked_at`, `thanks_seen_at`), skrivna genom RPC:er. **Ingen notis**,
-  och kortet räknas inte in i flikbrickan — det väntar inte på ett svar.
+  länge avsändaren inte sett det. **Avsändaren ser det bara i
+  förfrågans cirkel**: så länge förfrågan står kvar bär cirkeln ett
+  hjärta i stället för bocken. Ett rosa kort överst i Support-fliken
+  (*Anna sent you a heart · For your support with …*) fanns och togs bort
+  på begäran (november 2026); därmed markeras inget som sett längre, och
+  `fetchUnseenThanks`/`markThanksSeen` i lib/supportThanks.ts står
+  oanvända. Två kolumner på `support_responses` (`thanked_at`,
+  `thanks_seen_at`), skrivna genom RPC:er. **Ingen notis**, och inget
+  räknas in i flikbrickan.
   **Stöd man öppnat går att se igen i 24 timmar, sedan inte** (november
   2026, på begäran; [app/support-history.tsx](app/support-history.tsx)).
   Förr fanns ingen historik alls, med flit — ett svar syntes en gång, och
@@ -1315,6 +1333,16 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
     förfrågningarnas `liveStoryFilter` — det finns ingen cron.
   - Kuvertet och historiken öppnar svaret genom samma
     `openSupportResponse` ([lib/supportOpen.ts](lib/supportOpen.ts)).
+  - **Två flikar, *Received* och *Sent*** (`SegmentedPill`). *Sent* visar
+    stöd man skickat de senaste 24 timmarna, räknat från när det skickades,
+    med *Opened* / *Not opened yet* / *Opens after a pause* — och **hjärtat
+    tillbaka** som en rosa rad (*Anna sent you a heart*) och ett hjärta på
+    ansiktet. Det är det andra stället hjärtat syns, bredvid förfrågans
+    cirkel. Raderna går inte att öppna: visningsskärmarna markerar svaret
+    som öppnat, och det får bara mottagaren göra. På *Received* betyder ett
+    hjärta att man själv skickat ett tillbaka. *Sent* läses genom
+    `get_my_sent_support` (samma SQL-fil), så att mottagaren går att
+    namnge också när förfrågan är borttagen.
 - **Den som skickar kan försegla stödet tills mottagaren pausat**
   ([supabase/support_sealed.sql](supabase/support_sealed.sql), körs för hand
   efter support_photo.sql och sleep.sql; kör om social_notify.sql efteråt).
@@ -1328,10 +1356,19 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
   cirkel bär **bocken** som vilket skickat svar som helst — ett pausmärke
   där lästes som att personen pausade. Bara två lägen och ingen ångra, med
   flit.
-  - Mottagaren får notisen *Dag sent you support · Take a pause to open.*,
-    ett kort i Support-fliken med samma rad och en *Pause*-knapp, och efter
-    en paus på minst 3 min (`support_unlock_min_seconds`, `kind = 'pause'`)
-    *Your envelope is ready* på Hem, i puffarnas plats, som öppnar kuvertet.
+  - Mottagaren får notisen *Dag sent you support · Take a pause to open.*
+    I Support-fliken står det förseglade på **samma kort** som det som går
+    att öppna nu (november 2026, på begäran; förr ett eget kort med en
+    *Pause*-knapp), och i kuvertraden står de förseglade sist, med ett
+    **blått sigill** med pausens två streck, PAUSE-knappens *PAUSE TO OPEN*
+    under sig och raden *Opens after 2 minutes of pause*. Ett tryck på ett
+    förseglat kuvert ger bara en haptik. Efter en paus på minst **2 min**
+    (`support_unlock_min_seconds`, speglat av `SUPPORT_UNLOCK_MIN_MINUTES` i
+    lib/supportSealed.ts; var 3 min, `kind = 'pause'`) får kuvertet ett
+    hjärtsigill och knappen *OPEN* som de andra. Hem säger ingenting om det
+    längre: puffen *Your envelope is ready* togs bort på begäran (november
+    2026). Båda knapparna under kuvertet (*OPEN*, *PAUSE TO OPEN*) är
+    PAUSE-knappen från Hem.
   - **Spärren sitter i SQL:** en restriktiv SELECT-policy gör ett förseglat
     svar oläsligt för mottagaren tills en trigger på `pause_sessions` låst
     upp det, så inkorgen och brickan räknar det inte. `get_sealed_support()`

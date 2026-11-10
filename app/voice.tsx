@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
+import { closeSupportViewer } from '../lib/supportOpen';
 import { clearPending, getPending } from '../lib/supportQueue';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
@@ -137,7 +138,7 @@ function VoiceScreen() {
       await supabase.from('support_responses').update({ delivered_at: ts, played_at: ts }).eq('id', supportResponseIdRef.current);
       supportResponseIdRef.current = null;
     }
-    router.replace('/(tabs)/friends' as never);
+    closeSupportViewer();
   };
 
   const handlePauseLink = async () => {

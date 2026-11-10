@@ -42,7 +42,6 @@ import { NightMoon } from '../../components/night-moon';
 import { SegmentedPill } from '../../components/segmented-pill';
 import { supabase } from '../../lib/supabase';
 import { setCachedMyProfile } from '../../lib/myProfile';
-import { countReadyEnvelopes } from '../../lib/supportSealed';
 import type { DailyGoalProgress } from '../../types/database';
 
 // Veckans taggar står i nedre vänstra hörnet, där att göra-lappen satt
@@ -367,22 +366,6 @@ function HomeScreen() {
     isIntroDeferred().then(setIntroDeferred);
   }, []));
 
-  /**
-   * *Your envelope is ready*: förseglat stöd som en paus just låst upp
-   * (supabase/support_sealed.sql). Läses vid fokus och en gång till efter
-   * 2,5 s — Hem får fokus direkt efter pausen, innan pausens rad landat och
-   * triggern hunnit låsa upp kuvertet.
-   */
-  const [envelopesReady, setEnvelopesReady] = useState(0);
-  useFocusEffect(useCallback(() => {
-    if (!user?.id) return;
-    let alive = true;
-    const check = () => countReadyEnvelopes(user.id).then(n => { if (alive) setEnvelopesReady(n); });
-    check();
-    const t = setTimeout(check, 2500);
-    return () => { alive = false; clearTimeout(t); };
-  }, [user?.id]));
-
   // ── Efter en paus ────────────────────────────────────────────────────────
   // Lappen från sammanfattningen läses vid fokus, en gång. Klockan ringer
   // (den ringde förr på sammanfattningen), dagens siffra hämtas om när
@@ -556,8 +539,7 @@ function HomeScreen() {
     : Math.max(0, WEEK_TALLY_BOTTOM + tallyH - MIN_BOTTOM_GAP - BOTTOM_PAD);
   const heroExtras = cornerLift + MODE_PILL_H
     + (isNight ? NIGHT_TITLE_H : goalMet ? GOAL_MET_H : 0)
-    + (introDeferred ? SET_GOAL_BTN_H : 0)
-    + (envelopesReady > 0 && !isNight ? SET_GOAL_BTN_H : 0);
+    + (introDeferred ? SET_GOAL_BTN_H : 0);
   // Ytan mäts från blockets egen överkant (`centerY`) ner till containerns
   // innerkant. Innan båda landat gäller en räkning ur fönstret.
   const [centerY, setCenterY] = useState(0);
@@ -961,21 +943,6 @@ function HomeScreen() {
 
           {/* Puffen ligger utanför de två grenarna med flit: den som sköt upp
               introduktionen kan ha satt ett mål här under tiden. */}
-          {/* Samma plats och form som puffarna ovan. Inte i nattläge: natten
-              är privat och har bara SLEEP. */}
-          {envelopesReady > 0 && !isNight && (
-            <TouchableOpacity
-              onPress={() => router.push('/support-arrived' as never)}
-              activeOpacity={0.6}
-              style={[styles.setGoalBtn, styles.envelopeBtn]}
-              accessibilityLabel="Your envelope is ready. Open it."
-            >
-              <FontAwesome5 name="envelope-open-text" size={13} color={Palette.accent} />
-              <Text style={styles.setGoalBtnText}>
-                {envelopesReady === 1 ? 'Your envelope is ready' : `${envelopesReady} envelopes are ready`}
-              </Text>
-            </TouchableOpacity>
-          )}
 
           {introDeferred && (
             <TouchableOpacity
@@ -1200,7 +1167,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   ringSub: { fontSize: 14, lineHeight: 18, color: Palette.textSecondary, textAlign: 'center' },
   setGoalBtn: { marginTop: Spacing.lg, paddingVertical: 6, paddingHorizontal: 4 },
   setGoalBtnText: { fontSize: 14, fontWeight: '700', color: Palette.accent },
-  envelopeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
   backdrop: {
     flex: 1, backgroundColor: Palette.scrim,

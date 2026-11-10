@@ -6,7 +6,7 @@ import Reanimated, {
   Easing, interpolate, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue,
   withDelay, withRepeat, withSequence, withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, Defs, Line, Path, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 import { AppPalette, alpha } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { useHand } from '../lib/handFont';
@@ -40,8 +40,19 @@ export const ENVELOPE = {
   flap: '#fbe9dc',
   edge: 'rgba(184,106,68,0.32)',
   fold: 'rgba(184,106,68,0.24)',
+  // Papperets toningar och de mjuka kanterna (kuvertet här; det lilla
+  // kuvertet i opens-picker.tsx använder fortfarande edge/fold).
+  flapLight: '#fdf3ea',
+  flapDeep: '#f3d9c6',
+  pocketDeep: '#fbefe5',
+  hairline: 'rgba(150,85,50,0.16)',
+  shade: '#6e3719',
+  foldInk: '#9a5a34',
   glow: '#f0a882',
   seal: '#c9714b',
+  // Sigillet på ett kuvert som öppnas efter en paus: appens accent, samma blå
+  // som PAUSE-knappen.
+  pauseSeal: '#2e86de',
   sealMark: '#fff7f0',
 };
 
@@ -67,13 +78,65 @@ export const KIND_ICON: Record<SupportKind, string> = {
   photo: 'camera',
 };
 
+// Sigillet bryts först: det sväller (POP), spricker i två halvor som faller
+// isär (CRACK), och fliken börjar vika sig upp medan halvorna faller.
+const SEAL_POP_MS = 160;
+const SEAL_CRACK_MS = 420;
+const SEAL_LEAD_MS = SEAL_POP_MS + 140;
+// Kuvertets hörn och flikens spets, rundade så att det läses som papper och
+// inte som en ritad triangel.
+const CORNER_R = 12;
+const TIP_R = 9;
+// Hur långt under fliken dess mjuka skugga når.
+const FLAP_SHADOW = 4;
+
+type Pt = [number, number];
+
+/**
+ * En sluten form genom `points` där varje hörn rundas med sin radie: linjen
+ * stannar `r` före hörnet och svänger runt det med en kvadratisk kurva.
+ * Radien krymps om kanterna är för korta för den.
+ */
+function roundedPath(points: Pt[], radii: number[]): string {
+  const n = points.length;
+  const corner = (i: number) => {
+    const p = points[i];
+    const prev = points[(i - 1 + n) % n];
+    const next = points[(i + 1) % n];
+    const toward = (q: Pt, r: number): Pt => {
+      const dx = q[0] - p[0], dy = q[1] - p[1];
+      const len = Math.hypot(dx, dy) || 1;
+      return [p[0] + (dx / len) * r, p[1] + (dy / len) * r];
+    };
+    const r = Math.min(
+      radii[i] ?? 0,
+      Math.hypot(prev[0] - p[0], prev[1] - p[1]) / 2,
+      Math.hypot(next[0] - p[0], next[1] - p[1]) / 2,
+    );
+    return { p, a: toward(prev, r), b: toward(next, r) };
+  };
+  const cs = points.map((_, i) => corner(i));
+  const f = (q: Pt) => `${q[0].toFixed(2)} ${q[1].toFixed(2)}`;
+  let d = `M${f(cs[0].b)}`;
+  for (let i = 1; i <= n; i++) {
+    const c = cs[i % n];
+    d += ` L${f(c.a)} Q${f(c.p)} ${f(c.b)}`;
+  }
+  return `${d} Z`;
+}
+
+// Brevets ram (`letterClip`): luft på sidorna och över brevets högsta läge.
+const CLIP_SIDE = 40;
+const CLIP_TOP = 40;
 const FLAP_MS = 420;
 const LETTER_MS = 620;
 const SINK_MS = 420;
 
 export function SupportEnvelope({
-  width, senderName, senderAvatarUrl, kind, previewText, photoUrl, open, onOpened,
+  width, senderName, senderAvatarUrl, kind, previewText, photoUrl, open, onOpened, sealed = false,
 }: {
+  /** Öppnas efter en paus: blått sigill med pausens två streck. Går inte att öppna här. */
+  sealed?: boolean;
   width: number;
   senderName: string;
   senderAvatarUrl: string | null;
@@ -98,12 +161,17 @@ export function SupportEnvelope({
   // ovanför kuvertet, och resten fortfarande ser instoppat ut.
   const LETTER_RISE = Math.round(H * 0.95);
 
-  const styles = useMemo(() => makeStyles(Palette, W, H, FLAP_H, LETTER_INSET, LETTER_H), [Palette, W, H, FLAP_H, LETTER_INSET, LETTER_H]);
+  const styles = useMemo(
+    () => makeStyles(Palette, W, H, FLAP_H, LETTER_INSET, LETTER_H, LETTER_RISE),
+    [Palette, W, H, FLAP_H, LETTER_INSET, LETTER_H, LETTER_RISE],
+  );
 
   const flap = useSharedValue(0);
   const letter = useSharedValue(0);
   const sink = useSharedValue(0);
   const bob = useSharedValue(0);
+  const sealPop = useSharedValue(0);
+  const crack = useSharedValue(0);
 
   // Ett lugnt gupp medan kuvertet väntar. Det är det enda som säger "öppna
   // mig" utan en ringsignal, och det stannar när öppningen börjar.
@@ -121,16 +189,20 @@ export function SupportEnvelope({
   useEffect(() => {
     if (!open) return;
     if (reduceMotion) {
-      flap.value = 1; letter.value = 1; sink.value = 1;
+      sealPop.value = 1; crack.value = 1; flap.value = 1; letter.value = 1; sink.value = 1;
       onOpened();
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    flap.value = withTiming(1, { duration: FLAP_MS, easing: Easing.inOut(Easing.cubic) });
-    letter.value = withDelay(FLAP_MS - 60, withTiming(1, { duration: LETTER_MS, easing: Easing.out(Easing.cubic) }, done => {
+    sealPop.value = withTiming(1, { duration: SEAL_POP_MS, easing: Easing.out(Easing.back(3)) });
+    crack.value = withDelay(SEAL_POP_MS, withTiming(1, { duration: SEAL_CRACK_MS, easing: Easing.in(Easing.quad) }));
+    // Knäppen när sigillet spricker.
+    setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid).catch(() => {}), SEAL_POP_MS);
+    flap.value = withDelay(SEAL_LEAD_MS, withTiming(1, { duration: FLAP_MS, easing: Easing.inOut(Easing.cubic) }));
+    letter.value = withDelay(SEAL_LEAD_MS + FLAP_MS - 60, withTiming(1, { duration: LETTER_MS, easing: Easing.out(Easing.cubic) }, done => {
       if (done) runOnJS(lettered)();
     }));
-    sink.value = withDelay(FLAP_MS + LETTER_MS - 120, withTiming(1, { duration: SINK_MS, easing: Easing.in(Easing.cubic) }, done => {
+    sink.value = withDelay(SEAL_LEAD_MS + FLAP_MS + LETTER_MS - 120, withTiming(1, { duration: SINK_MS, easing: Easing.in(Easing.cubic) }, done => {
       if (done) runOnJS(onOpened)();
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,14 +223,31 @@ export function SupportEnvelope({
     transform: [{ scaleY: interpolate(flap.value, [0, 0.5, 1], [0, 0, 1]) }],
     opacity: interpolate(sink.value, [0, 1], [1, 0]),
   }));
+  // Hela sigillet sväller, och de två halvorna faller sedan isär åt var sitt
+  // håll: utåt, nedåt, vridna, och tonar bort.
   const sealStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(flap.value, [0, 0.25], [1, 0], 'clamp'),
-    transform: [{ scale: interpolate(flap.value, [0, 0.25], [1, 0.6], 'clamp') }],
+    transform: [{ scale: 1 + 0.18 * sealPop.value * (1 - crack.value) }],
+  }));
+  const halfLeftStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(crack.value, [0, 0.15, 1], [1, 1, 0]),
+    transform: [
+      { translateX: interpolate(crack.value, [0, 1], [0, -22]) },
+      { translateY: interpolate(crack.value, [0, 1], [0, 34]) },
+      { rotate: `${interpolate(crack.value, [0, 1], [0, -28])}deg` },
+    ],
+  }));
+  const halfRightStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(crack.value, [0, 0.15, 1], [1, 1, 0]),
+    transform: [
+      { translateX: interpolate(crack.value, [0, 1], [0, 22]) },
+      { translateY: interpolate(crack.value, [0, 1], [0, 30]) },
+      { rotate: `${interpolate(crack.value, [0, 1], [0, 24])}deg` },
+    ],
   }));
   const letterStyle = useAnimatedStyle(() => ({
     transform: [
       { translateY: interpolate(letter.value, [0, 1], [0, -LETTER_RISE]) + interpolate(sink.value, [0, 1], [0, H * 0.35]) },
-      { scale: interpolate(sink.value, [0, 1], [1, 1.08]) },
+      { scale: interpolate(sink.value, [0, 1], [1, 1.16]) },
     ],
   }));
   const envelopeStyle = useAnimatedStyle(() => ({
@@ -169,6 +258,17 @@ export function SupportEnvelope({
   const firstName = senderName.split(' ')[0];
 
   const GLOW = Math.round(W * 1.7);
+  // Hjärtat på ett kuvert som går att öppna; pausens två streck i blått på
+  // ett som öppnas efter en paus — samma blå som PAUSE-knappen under det.
+  const sealMark = sealed ? (
+    <View style={styles.pauseMark}>
+      <View style={styles.pauseMarkBar} />
+      <View style={styles.pauseMarkBar} />
+    </View>
+  ) : (
+    <FontAwesome5 name="heart" solid size={19} color={ENVELOPE.sealMark} style={styles.sealHeart} />
+  );
+  const flapPath = roundedPath([[0, 0.5], [W, 0.5], [W / 2, FLAP_H]], [CORNER_R, CORNER_R, TIP_R]);
 
   return (
     <Reanimated.View style={[{ width: W, height: H, marginTop: LETTER_RISE }, wholeStyle]}>
@@ -195,11 +295,25 @@ export function SupportEnvelope({
       </Reanimated.View>
       <Reanimated.View style={[styles.backFlap, backFlapStyle]} pointerEvents="none">
         <Svg width={W} height={FLAP_H}>
-          <Path d={`M0.5 ${FLAP_H} L${W / 2} 0.5 L${W - 0.5} ${FLAP_H}`} fill={ENVELOPE.flap} stroke={ENVELOPE.edge} strokeWidth={1} />
+          <Defs>
+            {/* Flikens insida, sedd framifrån: mörkare mot spetsen. */}
+            <LinearGradient id="backFlapFill" x1="0" y1="1" x2="0" y2="0">
+              <Stop offset="0" stopColor={ENVELOPE.flap} />
+              <Stop offset="1" stopColor={ENVELOPE.flapDeep} />
+            </LinearGradient>
+          </Defs>
+          <Path
+            d={roundedPath([[0, FLAP_H], [W / 2, 0.5], [W, FLAP_H]], [CORNER_R * 0.6, TIP_R, CORNER_R * 0.6])}
+            fill="url(#backFlapFill)" stroke={ENVELOPE.hairline} strokeWidth={0.75}
+          />
         </Svg>
       </Reanimated.View>
 
-      {/* Brevet. */}
+      {/* Brevet, i en ram som slutar vid kuvertets nederkant och är öppen
+          uppåt: brevet är högre än kuvertet, och utan ramen stack dess nedre
+          del ut under fickan. Ramen är lite bredare än kuvertet, så att
+          brevet får växa när det glider fram. */}
+      <View style={styles.letterClip} pointerEvents="none">
       <Reanimated.View style={[styles.letter, letterStyle]} pointerEvents="none">
         <View style={styles.letterHead}>
           {senderAvatarUrl ? (
@@ -222,36 +336,83 @@ export function SupportEnvelope({
           </View>
         )}
       </Reanimated.View>
+      </View>
 
       {/* Fickan framför brevet och fliken som är stängd. */}
       <Reanimated.View style={[StyleSheet.absoluteFill, envelopeStyle]} pointerEvents="none">
         <Svg width={W} height={H}>
-          <Path d={`M0 0 L${W / 2} ${FLAP_H} L${W} 0 L${W} ${H - 10} Q${W} ${H} ${W - 10} ${H} L10 ${H} Q0 ${H} 0 ${H - 10} Z`} fill={ENVELOPE.pocket} stroke={ENVELOPE.edge} strokeWidth={1} />
-          <Line x1={0} y1={H} x2={W / 2} y2={H * 0.5} stroke={ENVELOPE.fold} strokeWidth={1.2} />
-          <Line x1={W} y1={H} x2={W / 2} y2={H * 0.5} stroke={ENVELOPE.fold} strokeWidth={1.2} />
+          <Defs>
+            <LinearGradient id="pocketFill" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={ENVELOPE.pocket} />
+              <Stop offset="1" stopColor={ENVELOPE.pocketDeep} />
+            </LinearGradient>
+            {/* Vecken tonar bort mot mitten, som ett pappersveck gör. */}
+            <LinearGradient id="foldL" x1="0" y1="1" x2="1" y2="0">
+              <Stop offset="0" stopColor={ENVELOPE.foldInk} stopOpacity={0.22} />
+              <Stop offset="1" stopColor={ENVELOPE.foldInk} stopOpacity={0} />
+            </LinearGradient>
+            <LinearGradient id="foldR" x1="1" y1="1" x2="0" y2="0">
+              <Stop offset="0" stopColor={ENVELOPE.foldInk} stopOpacity={0.22} />
+              <Stop offset="1" stopColor={ENVELOPE.foldInk} stopOpacity={0} />
+            </LinearGradient>
+          </Defs>
+          <Path
+            d={roundedPath(
+              [[0, 0], [W / 2, FLAP_H], [W, 0], [W, H], [0, H]],
+              [CORNER_R, TIP_R, CORNER_R, CORNER_R, CORNER_R],
+            )}
+            fill="url(#pocketFill)" stroke={ENVELOPE.hairline} strokeWidth={0.75}
+          />
+          <Line x1={4} y1={H - 3} x2={W / 2} y2={H * 0.5} stroke="url(#foldL)" strokeWidth={1} strokeLinecap="round" />
+          <Line x1={W - 4} y1={H - 3} x2={W / 2} y2={H * 0.5} stroke="url(#foldR)" strokeWidth={1} strokeLinecap="round" />
         </Svg>
       </Reanimated.View>
       <Reanimated.View style={[styles.frontFlap, frontFlapStyle]} pointerEvents="none">
-        <Svg width={W} height={FLAP_H + 2}>
-          <Path d={`M0.5 0.5 L${W - 0.5} 0.5 L${W / 2} ${FLAP_H} Z`} fill={ENVELOPE.flap} stroke={ENVELOPE.edge} strokeWidth={1} />
+        <Svg width={W} height={FLAP_H + FLAP_SHADOW}>
+          <Defs>
+            <LinearGradient id="flapFill" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={ENVELOPE.flapLight} />
+              <Stop offset="1" stopColor={ENVELOPE.flap} />
+            </LinearGradient>
+          </Defs>
+          {/* Flikens skugga på fickan: samma form, förskjuten nedåt i två
+              steg. Den mjuka kanten är det som får fliken att ligga på
+              pappret i stället för att vara ritad på det. */}
+          <Path d={flapPath} fill={ENVELOPE.shade} fillOpacity={0.05} translateY={FLAP_SHADOW} />
+          <Path d={flapPath} fill={ENVELOPE.shade} fillOpacity={0.09} translateY={FLAP_SHADOW / 2} />
+          <Path d={flapPath} fill="url(#flapFill)" stroke={ENVELOPE.hairline} strokeWidth={0.75} />
         </Svg>
       </Reanimated.View>
 
-      {/* Sigillet: ett hjärta där flikens spets möter fickan. */}
+      {/* Sigillet: ett hjärta där flikens spets möter fickan. Det är ritat
+          två gånger, var och en klippt till sin halva, så att det kan spricka
+          mitt itu när kuvertet öppnas. */}
       <Reanimated.View style={[styles.seal, { top: FLAP_H - 24 }, sealStyle]} pointerEvents="none">
-        <FontAwesome5 name="heart" solid size={19} color={ENVELOPE.sealMark} style={styles.sealHeart} />
+        <Reanimated.View style={[styles.sealHalf, halfLeftStyle]}>
+          <View style={[styles.sealDisc, sealed && styles.sealDiscPause]}>{sealMark}</View>
+        </Reanimated.View>
+        <Reanimated.View style={[styles.sealHalf, halfRightStyle]}>
+          <View style={[styles.sealDisc, sealed && styles.sealDiscPause, { left: -24 }]}>{sealMark}</View>
+        </Reanimated.View>
       </Reanimated.View>
     </Reanimated.View>
   );
 }
 
 const makeStyles = (
-  Palette: AppPalette, W: number, H: number, FLAP_H: number, inset: number, letterH: number,
+  Palette: AppPalette, W: number, H: number, FLAP_H: number, inset: number, letterH: number, rise: number,
 ) => StyleSheet.create({
+  // Från brevets högsta läge ner till strax innanför kuvertets nederkant;
+  // CLIP_SIDE på var sida, för brevet växer 16 % när det glider fram.
+  letterClip: {
+    position: 'absolute', overflow: 'hidden',
+    left: -CLIP_SIDE, right: -CLIP_SIDE,
+    top: -rise - CLIP_TOP, height: rise + CLIP_TOP + H - 2,
+  },
   glow: { position: 'absolute' },
   body: {
-    flex: 1, backgroundColor: ENVELOPE.body, borderRadius: 10,
-    borderWidth: 1, borderColor: ENVELOPE.edge,
+    flex: 1, backgroundColor: ENVELOPE.body, borderRadius: CORNER_R,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: ENVELOPE.hairline,
     ...Palette.cardShadow,
   },
   backFlap: {
@@ -259,11 +420,12 @@ const makeStyles = (
     transformOrigin: 'bottom',
   },
   frontFlap: {
-    position: 'absolute', left: 0, top: 0, width: W, height: FLAP_H + 2,
+    position: 'absolute', left: 0, top: 0, width: W, height: FLAP_H + FLAP_SHADOW,
     transformOrigin: 'top',
   },
   letter: {
-    position: 'absolute', left: inset, right: inset, top: 8, height: letterH,
+    position: 'absolute', left: inset + CLIP_SIDE, right: inset + CLIP_SIDE,
+    top: rise + CLIP_TOP + 8, height: letterH,
     backgroundColor: LETTER_PAPER.paper, borderRadius: 8,
     paddingHorizontal: 16, paddingTop: 14, gap: 10,
     borderWidth: 1, borderColor: LETTER_PAPER.edge,
@@ -279,11 +441,20 @@ const makeStyles = (
   letterKindText: { color: LETTER_PAPER.inkSoft },
   seal: {
     position: 'absolute',
-    left: W / 2 - 24, width: 48, height: 48, borderRadius: 24,
+    left: W / 2 - 24, width: 48, height: 48,
+    flexDirection: 'row',
+  },
+  sealHalf: { width: 24, height: 48, overflow: 'hidden' },
+  sealDisc: {
+    position: 'absolute', top: 0, left: 0,
+    width: 48, height: 48, borderRadius: 24,
     backgroundColor: ENVELOPE.seal,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: alpha('#ffffff', 0.7),
   },
   // Hjärtats tyngd ligger lågt i glyfen; en punkt upp står det mitt i skivan.
   sealHeart: { marginTop: 1 },
+  sealDiscPause: { backgroundColor: ENVELOPE.pauseSeal },
+  pauseMark: { flexDirection: 'row', gap: 5 },
+  pauseMarkBar: { width: 5, height: 17, borderRadius: 2.5, backgroundColor: ENVELOPE.sealMark },
 });

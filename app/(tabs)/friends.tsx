@@ -43,11 +43,10 @@ import { isNightHours } from '../../lib/homeMode';
 import { enablePushNotifications } from '../../lib/notifications';
 import { startSleep } from '../../lib/sleep';
 import { supabase } from '../../lib/supabase';
-import { liveStoryFilter, recentSupportQuery, storyTimeLeft, unopenedResponsesQuery } from '../../lib/supportStories';
-import { fetchUnseenThanks, markThanksSeen, SupportThanks } from '../../lib/supportThanks';
+import {
+  fetchSentSupport, liveStoryFilter, recentSupportQuery, storyTimeLeft, unopenedResponsesQuery,
+} from '../../lib/supportStories';
 import { fetchSealedSupport, SealedSupport } from '../../lib/supportSealed';
-import { openPauseStart } from '../../lib/pauseFlow';
-import { ENVELOPE } from '../../components/support-envelope';
 import { intentionTone } from '../../components/pause-tag-chips';
 import type { PauseSession, Profile } from '../../types/database';
 import { Category, DEFAULT_CATEGORIES, getSelectedCategories } from '../pauseLogger';
@@ -982,95 +981,20 @@ const makeRequestStyles = (Palette: AppPalette) => StyleSheet.create({
 });
 
 /**
- * Förseglat stöd: *Dag sent you support · Take a pause to open*. Ett kuvert
- * med pausens sigill, och knappen startar en paus. Innehållet går inte att
- * läsa förrän pausen är gjord — det spärras i SQL (supabase/support_sealed.sql),
- * och Hem säger *Your envelope is ready* när det låsts upp.
- */
-function SealedCard({ sealed }: { sealed: SealedSupport[] }) {
-  const Palette = usePalette();
-  const s = useMemo(() => makeInboxStyles(Palette), [Palette]);
-  const first = sealed[0];
-  const firstName = first.username.split(' ')[0];
-  const title = sealed.length === 1
-    ? `${firstName} sent you support`
-    : `${sealed.length} sealed envelopes`;
-  return (
-    <View style={s.sealedCard}>
-      <View style={s.sealedEnvelope}>
-        <FontAwesome5 name="envelope" size={26} color={ENVELOPE.flap} solid />
-        <View style={s.sealedSeal}>
-          <View style={s.sealedSealBar} />
-          <View style={s.sealedSealBar} />
-        </View>
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={s.inboxTitle} numberOfLines={2}>{title}</Text>
-        <Text style={s.thanksSub}>Take a pause to open.</Text>
-      </View>
-      <TouchableOpacity
-        style={s.sealedBtn}
-        onPress={() => openPauseStart('push')}
-        activeOpacity={0.85}
-        accessibilityRole="button"
-        accessibilityLabel="Start a pause to open it"
-      >
-        <FontAwesome5 name="pause" size={11} color={Palette.onAccent} />
-        <Text style={s.sealedBtnText}>Pause</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-/**
- * *Anna sent you a heart* — ett hjärta tillbaka för stöd man skickat
- * (supabase/support_thanks.sql). Det visas en gång: raderna markeras sedda när
- * de hämtats, och kortet står kvar tills fliken lämnas. Hjärtat studsar in,
- * för det här är det enda ögonblicket avsändaren får veta att stödet nådde fram.
- */
-function ThanksCard({ thanks }: { thanks: SupportThanks[] }) {
-  const Palette = usePalette();
-  const s = useMemo(() => makeInboxStyles(Palette), [Palette]);
-  const reduceMotion = useReducedMotion();
-  const pop = useSharedValue(reduceMotion ? 1 : 0.4);
-  useEffect(() => {
-    if (reduceMotion) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    pop.value = withSpring(1, { damping: 7, stiffness: 160 });
-  }, [reduceMotion, pop]);
-  const heartStyle = useAnimatedStyle(() => ({ transform: [{ scale: pop.value }] }));
-  const first = thanks[0];
-  const firstName = first.username.split(' ')[0];
-  const others = new Set(thanks.map(t => t.userId)).size - 1;
-  const title = others <= 0
-    ? `${firstName} sent you a heart`
-    : `${firstName} and ${others} ${others === 1 ? 'other' : 'others'} sent you hearts`;
-  const sub = thanks.length === 1 && first.activity
-    ? `For your support with ${first.activity}`
-    : 'For the support you sent';
-  return (
-    <View style={s.thanksCard} accessibilityRole="text" accessibilityLabel={`${title}. ${sub}.`}>
-      <View>
-        <Avatar username={first.username} avatarUrl={first.avatarUrl} size={48} />
-        <Reanimated.View style={[s.thanksHeart, heartStyle]}>
-          <FontAwesome5 name="heart" size={12} solid color={Palette.onAccent} />
-        </Reanimated.View>
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={s.inboxTitle} numberOfLines={2}>{title}</Text>
-        <Text style={s.thanksSub} numberOfLines={2}>{sub}</Text>
-      </View>
-    </View>
-  );
-}
-
-/**
  * Stöd som väntar, överst i fliken. Det ersatte två små ikoner på rubrikraden
  * (en lur och ett kuvert) som var lätta att missa — och luren lovade ett
- * samtal. Ett tryck öppnar kuvertet i app/support-arrived.tsx.
+ * samtal. Ett tryck öppnar kuvertraden i app/support-arrived.tsx.
+ *
+ * **Ett kort för allt som väntar**, också det som öppnas efter en paus
+ * (november 2026, på begäran). Förseglat stöd hade förr ett eget kort med en
+ * *Pause*-knapp; nu står de förseglade sist i kuvertraden, med blått sigill
+ * och PAUSE-knappen under sig.
  */
-function SupportInboxCard({ count, senderName, senderAvatarUrl, onPress }: {
-  count: number; senderName: string; senderAvatarUrl: string | null; onPress: () => void;
+function SupportInboxCard({ count, allSealed, senderName, senderAvatarUrl, onPress }: {
+  count: number;
+  /** Allt som väntar öppnas efter en paus. */
+  allSealed: boolean;
+  senderName: string; senderAvatarUrl: string | null; onPress: () => void;
 }) {
   const Palette = usePalette();
   const inboxStyles = useMemo(() => makeInboxStyles(Palette), [Palette]);
@@ -1094,7 +1018,9 @@ function SupportInboxCard({ count, senderName, senderAvatarUrl, onPress }: {
         <Text style={inboxStyles.inboxTitle} numberOfLines={2}>
           {count === 1 ? `${firstName} sent you support` : `${count} messages of support`}
         </Text>
-        <Text style={inboxStyles.inboxSub}>Open the envelope</Text>
+        <Text style={inboxStyles.inboxSub}>
+          {allSealed ? 'Take a pause to open' : count === 1 ? 'Open the envelope' : 'Open the envelopes'}
+        </Text>
       </View>
       <FontAwesome5 name="chevron-right" size={14} color={Palette.hue} />
     </TouchableOpacity>
@@ -1618,7 +1544,6 @@ function FriendsScreen() {
     }
   }, [user]);
 
-  const [thanks, setThanks] = useState<SupportThanks[]>([]);
   const [sealedSupport, setSealedSupport] = useState<SealedSupport[]>([]);
   useFocusEffect(
     useCallback(() => {
@@ -1626,18 +1551,6 @@ function FriendsScreen() {
       let alive = true;
       fetchSealedSupport().then(list => { if (alive) setSealedSupport(list); });
       return () => { alive = false; };
-    }, [user?.id])
-  );
-  useFocusEffect(
-    useCallback(() => {
-      if (!user?.id) return;
-      let alive = true;
-      fetchUnseenThanks().then(list => {
-        if (!alive || list.length === 0) return;
-        setThanks(list);
-        markThanksSeen(list.map(t => t.responseId));
-      });
-      return () => { alive = false; setThanks([]); };
     }, [user?.id])
   );
 
@@ -1665,8 +1578,11 @@ function FriendsScreen() {
       checkPending();
       // Klockan i rubrikraden (app/support-history.tsx) syns bara när det
       // finns något öppnat de senaste 24 timmarna.
-      recentSupportQuery(user.id, 'id', { count: 'exact', head: true })
-        .then(({ count }) => setRecentSupport(count ?? 0));
+      // Mottaget eller skickat — historiken har en flik för vardera.
+      Promise.all([
+        recentSupportQuery(user.id, 'id', { count: 'exact', head: true }),
+        fetchSentSupport(),
+      ]).then(([{ count }, sent]) => setRecentSupport((count ?? 0) + sent.length));
     }, [user?.id])
   );
 
@@ -1903,17 +1819,15 @@ function FriendsScreen() {
         )}
       </View>
 
-      {/* Stöd som väntar. Kortet är kuvertet i liten skala och leder till
-          app/support-arrived.tsx, där det öppnas. */}
-      {thanks.length > 0 && <ThanksCard thanks={thanks} />}
-
-      {sealedSupport.length > 0 && <SealedCard sealed={sealedSupport} />}
-
-      {inbox && (
+      {/* Stöd som väntar — det som går att öppna nu och det som öppnas efter
+          en paus, på ett och samma kort. Kortet leder till kuvertraden i
+          app/support-arrived.tsx, där de förseglade har ett blått sigill. */}
+      {(inbox || sealedSupport.length > 0) && (
         <SupportInboxCard
-          count={inbox.count}
-          senderName={inbox.senderName}
-          senderAvatarUrl={inbox.senderAvatarUrl}
+          count={(inbox?.count ?? 0) + sealedSupport.length}
+          allSealed={!inbox}
+          senderName={inbox?.senderName ?? sealedSupport[sealedSupport.length - 1].username}
+          senderAvatarUrl={inbox ? inbox.senderAvatarUrl : sealedSupport[sealedSupport.length - 1].avatarUrl}
           onPress={() => router.push('/support-arrived' as never)}
         />
       )}
@@ -2605,45 +2519,6 @@ const makeInboxStyles = (Palette: AppPalette) => StyleSheet.create({
     borderRadius: 13, borderWidth: 2, borderColor: Palette.surface,
   },
   inboxTitle: { fontSize: 17, fontWeight: '800', color: Palette.textPrimary },
-  thanksCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    padding: 16, borderRadius: Radius.lg,
-    backgroundColor: alpha(Palette.dangerSoft, 0.12),
-    borderWidth: 1, borderColor: alpha(Palette.dangerSoft, 0.4),
-  },
-  thanksHeart: {
-    position: 'absolute', right: -4, bottom: -4,
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: Palette.dangerSoft,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: Palette.bg,
-  },
-  thanksSub: { fontSize: 13, color: Palette.textSecondary },
-  sealedCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    padding: 16, borderRadius: Radius.lg,
-    backgroundColor: Palette.surface,
-    borderWidth: 1, borderColor: alpha(ENVELOPE.seal, 0.45),
-  },
-  sealedEnvelope: {
-    width: 52, height: 52, borderRadius: 26,
-    backgroundColor: alpha(ENVELOPE.seal, 0.16),
-    alignItems: 'center', justifyContent: 'center',
-  },
-  sealedSeal: {
-    position: 'absolute', right: 4, bottom: 6,
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: ENVELOPE.seal,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2.5,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.8)',
-  },
-  sealedSealBar: { width: 2.5, height: 7, borderRadius: 1.25, backgroundColor: ENVELOPE.sealMark },
-  sealedBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 7,
-    backgroundColor: Palette.accent, borderRadius: Radius.pill,
-    paddingVertical: 10, paddingHorizontal: 14,
-  },
-  sealedBtnText: { color: Palette.onAccent, fontSize: 14, fontWeight: '800' },
   inboxSub: { fontSize: 13, color: Palette.hue, fontWeight: '600' },
 });
 

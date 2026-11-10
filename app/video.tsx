@@ -8,6 +8,7 @@ import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
+import { closeSupportViewer } from '../lib/supportOpen';
 import { clearPending, getPending } from '../lib/supportQueue';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
@@ -94,7 +95,7 @@ export default function VideoScreen() {
       await supabase.from('support_responses').update({ delivered_at: ts, played_at: ts }).eq('id', supportResponseIdRef.current);
       supportResponseIdRef.current = null;
     }
-    router.replace('/(tabs)/friends' as never);
+    closeSupportViewer();
   };
 
   const handlePauseLink = async () => {

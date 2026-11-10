@@ -79,6 +79,41 @@ export const SUPPORT_HISTORY_MS = STORY_LIFETIME_MS;
  * finns ingen cron i projektet). Att `delivered_at` inte flyttas när ett svar
  * ses igen sköts av triggern i supabase/support_history.sql.
  */
+export type SentSupport = {
+  id: string;
+  kind: 'text' | 'voice' | 'video' | 'photo';
+  createdAt: string;
+  deliveredAt: string | null;
+  thankedAt: string | null;
+  sealed: boolean;
+  recipientName: string;
+  recipientAvatarUrl: string | null;
+  activity: string | null;
+};
+
+/**
+ * Stöd man själv skickat de senaste 24 timmarna, räknat från när det
+ * skickades (`get_my_sent_support` i supabase/support_history.sql). En RPC för
+ * att mottagaren ska gå att namnge också när förfrågan är borttagen. Saknas
+ * funktionen blir listan tom i stället för ett fel.
+ */
+export async function fetchSentSupport(): Promise<SentSupport[]> {
+  const since = new Date(Date.now() - SUPPORT_HISTORY_MS).toISOString();
+  const { data, error } = await supabase.rpc('get_my_sent_support', { p_since: since });
+  if (error || !data) return [];
+  return (data as any[]).map(r => ({
+    id: r.id,
+    kind: r.response_type,
+    createdAt: r.created_at,
+    deliveredAt: r.delivered_at,
+    thankedAt: r.thanked_at,
+    sealed: !!r.sealed,
+    recipientName: r.recipient_username ?? 'A friend',
+    recipientAvatarUrl: r.recipient_avatar_url ?? null,
+    activity: r.activity ?? null,
+  }));
+}
+
 export function recentSupportQuery<Columns extends string>(
   userId: string,
   columns: Columns,

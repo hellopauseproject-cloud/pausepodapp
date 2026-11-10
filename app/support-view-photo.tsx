@@ -5,12 +5,17 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
+import { closeSupportViewer } from '../lib/supportOpen';
+import { PauseButtonFace } from '../components/pause-button-face';
 import {
   CAPTION_BAND_PADDING, CAPTION_DEFAULT_Y, CAPTION_FONT_SIZE, CAPTION_LINE_HEIGHT,
 } from '../lib/photoCaption';
 import { AppPalette, Radius } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { SupportHeartButton } from '../components/support-heart-button';
+
+// Samma höjd som PAUSE på Hem.
+const PAUSE_BTN_H = 58;
 
 /**
  * Mottagarsidan av ett fotosvar. Bilden och bildtexten kommer var för sig ur
@@ -66,7 +71,7 @@ export default function SupportViewPhotoScreen() {
 
   const handleDecline = async () => {
     await markDelivered();
-    router.replace('/(tabs)');
+    closeSupportViewer();
   };
 
   return (
@@ -113,8 +118,12 @@ export default function SupportViewPhotoScreen() {
           <SupportHeartButton responseId={messageId} senderName={senderName ?? 'A friend'} />
         </View>
         <TouchableOpacity style={styles.acceptBtn} onPress={handleAccept} activeOpacity={0.85}>
-          <FontAwesome5 name="pause" size={13} color={Palette.onAccent} />
-          <Text style={styles.acceptText}>I&apos;ll take a pause</Text>
+          <PauseButtonFace radius={PAUSE_BTN_H / 2} />
+          <View style={styles.pauseGlyph}>
+            <View style={styles.pauseGlyphBar} />
+            <View style={styles.pauseGlyphBar} />
+          </View>
+          <Text style={styles.acceptText}>I&apos;LL TAKE A PAUSE</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.declineBtn} onPress={handleDecline} activeOpacity={0.8}>
           <Text style={styles.declineText}>Not a good time</Text>
@@ -156,14 +165,22 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
 
   actions: { paddingHorizontal: 24, paddingTop: 16, gap: 4, backgroundColor: Palette.bg },
   heartWrap: { marginBottom: 14 },
+  // Samma knapp som PAUSE på Hem (app/(tabs)/index.tsx): materialet, glöden,
+  // pausens två streck och displayversaler.
   acceptBtn: {
     backgroundColor: Palette.accent,
-    paddingVertical: 16, borderRadius: Radius.pill,
+    height: PAUSE_BTN_H, borderRadius: PAUSE_BTN_H / 2,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     marginBottom: 4,
-    ...Palette.cardShadow,
+    shadowColor: Palette.accent,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 22,
+    elevation: 12,
   },
-  acceptText: { color: Palette.onAccent, fontSize: 16, fontWeight: '600', letterSpacing: 0.3 },
+  pauseGlyph: { flexDirection: 'row', gap: 6 },
+  pauseGlyphBar: { width: 6, height: 18, borderRadius: 3, backgroundColor: Palette.onAccent },
+  acceptText: { color: Palette.onAccent, fontSize: 17, fontWeight: '900', letterSpacing: 2 },
   declineBtn: { paddingVertical: 14, alignItems: 'center' },
   declineText: { color: Palette.textSecondary, fontSize: 15 },
 });
