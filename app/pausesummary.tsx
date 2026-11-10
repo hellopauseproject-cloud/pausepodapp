@@ -6,6 +6,7 @@ import { Animated, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet
 import { useAuth } from '../contexts/AuthContext';
 import { track } from '../lib/analytics';
 import { setPendingPauseTag } from '../lib/pauseTags';
+import { SUPPORT_UNLOCK_MIN_MINUTES, takeEnvelopeAfterPause } from '../lib/supportSealed';
 import { GlobalPauseResult, takeGlobalPauseResult } from '../lib/globalPause';
 import { GlobalPauseSummary } from '../components/global-pause-summary';
 import { getSharedPausePeople, SharedPausePerson } from '../lib/pauseInvites';
@@ -119,6 +120,13 @@ function PauseSummaryScreen() {
       handedOffRef.current = true;
       setPendingPauseTag(seconds, !!category, true, sleepable);
       router.replace('/(tabs)');
+      // Startades pausen från *PAUSE TO OPEN* på ett förseglat kuvert, och var
+      // den lång nog att låsa upp det, går vägen vidare till kuvertet. Hem
+      // ligger under, så att man kommer dit (och till taggfrågan) efteråt.
+      const envelope = takeEnvelopeAfterPause();
+      if (envelope && seconds >= SUPPORT_UNLOCK_MIN_MINUTES * 60) {
+        setTimeout(() => router.push({ pathname: '/support-arrived', params: { unlocked: envelope } } as any), 0);
+      }
       return;
     }
     if (!handedOffRef.current) {

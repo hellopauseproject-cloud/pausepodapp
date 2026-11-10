@@ -492,7 +492,8 @@ ihop. Det var när den blev en siffra som chatten var tvungen att räknas med.
     pricken inne i fliken gör, mot `circle_members.chat_read_at` (eller
     `joined_at` för den som aldrig öppnat chatten). Pricken står kvar:
     brickan säger *att* något finns, pricken säger *var* i fliken.
-- **Friends = vänförfrågningar + öppna pausinbjudningar + oöppnade stödsvar.**
+- **Friends = vänförfrågningar + öppna pausinbjudningar + oöppnade stödsvar**
+  (förseglade inräknade).
   Inbjudningarna räknas med `countOpenPauseInvites()`, som är samma fråga
   som korten i fliken (`fetchIncomingPauseInvites`) — samma regel som Circle.
 - **Bara det som väntar på ett svar räknas, aldrig det som bara hänt.**
@@ -1303,9 +1304,11 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
   det är något någon skrivit.
 - **Man kan skicka ett hjärta tillbaka** ([supabase/support_thanks.sql](supabase/support_thanks.sql),
   körs för hand efter support_photo.sql; [lib/supportThanks.ts](lib/supportThanks.ts)).
-  *Send a heart back* står på alla fyra visningsskärmarna
-  ([components/support-heart-button.tsx](components/support-heart-button.tsx)),
-  i `dangerSoft` som pausens hjärta, och tömmer sig vid ett andra tryck så
+  Ett tomt hjärta, utan ord, står på alla fyra visningsskärmarna
+  ([components/support-heart-button.tsx](components/support-heart-button.tsx);
+  *Send a heart back* i en kapsel togs bort på begäran). Det fylls med ett
+  *pop* — en studs och en ring som slår ut — i `dangerSoft` som pausens
+  hjärta, och tömmer sig vid ett andra tryck så
   länge avsändaren inte sett det. **Avsändaren ser det bara i
   förfrågans cirkel**: så länge förfrågan står kvar bär cirkeln ett
   hjärta i stället för bocken. Ett rosa kort överst i Support-fliken
@@ -1371,8 +1374,19 @@ sortens ikon på), och tonar över i samma visningsskärmar som förut.
     PAUSE-knappen från Hem.
   - **Spärren sitter i SQL:** en restriktiv SELECT-policy gör ett förseglat
     svar oläsligt för mottagaren tills en trigger på `pause_sessions` låst
-    upp det, så inkorgen och brickan räknar det inte. `get_sealed_support()`
+    upp det, så inkorgens fråga ser det inte. `get_sealed_support()`
     lämnar bara ut vem och när. Ingen notis vid upplåsningen.
+  - **En paus från *PAUSE TO OPEN* slutar vid kuvertet**, inte på Hem, om
+    den var lång nog att låsa upp det: knappen lämnar en lapp
+    (`setEnvelopeAfterPause` i lib/supportSealed.ts, i minnet, högst 6 h), och
+    sammanfattningens överlämning lägger kuvertskärmen ovanpå Hem med
+    `unlocked`. Upplåsningen kan landa strax efter, så skärmen frågar om i
+    upp till sex sekunder och ställer kuvertet i mitten. Bara ensamma pauser;
+    en delad paus och en Global Pause har sina egna sammanfattningar.
+  - **Flikbrickan räknar ändå de förseglade**, ur `get_sealed_support()`
+    (`fetchMessageCount` i app/(tabs)/_layout.tsx): kuvertraden visar dem,
+    och brickan räknar det fliken visar. Ett upplåst svar lämnar den listan
+    i samma stund som inkorgens fråga börjar se det.
 - Både text och foto slutar med samma två val (*I'll take a pause* /
   *Not a good time*). Det är samma sorts pepp som landat på två sätt.
 
@@ -2086,8 +2100,9 @@ inget tak. Utan taggar i veckan syns inte hörnet alls.
 
 - **Exklusivt genom återhållsamhet och en avslöjning.** Hörnet är *THIS
   WEEK* i glesa versaler och en enda rad korta **platta, rundade streck**
-  ([components/tally-rod.tsx](components/tally-rod.tsx)) i rummets kulör;
-  intentionerna skiljs bara åt av en större lucka. Över fjorton streck står
+  ([components/tally-rod.tsx](components/tally-rod.tsx)) i rummets kulör,
+  alla med samma lucka (en större lucka mellan intentionerna föll på
+  begäran: strecken lästes två och två). Över fjorton streck står
   resten som `+N`. **Kulören bor inuti:** ett tryck öppnar arket med varje
   intention — emoji, namn och sina streck i sin egen ton — och *Tag your
   pauses ›*, som öppnar statistiken nedrullad till *Recent pauses*

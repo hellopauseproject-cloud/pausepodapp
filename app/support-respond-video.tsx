@@ -101,13 +101,22 @@ export default function SupportRespondVideoScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraPermission?.granted, micPermission?.status]);
 
-  const player = useVideoPlayer(
-    phase === 'reviewing' && recordedUri ? { uri: recordedUri } : null,
-    p => {
-      p.loop = false;
-      if (recordedUri) p.play();
-    }
-  );
+  // En spelare för skärmens hela liv; inspelningen läggs i den med
+  // replaceAsync. Med källan som argument byggdes en ny spelare vid varje
+  // fasbyte (reviewing → uploading → reviewing) och den gamla släpptes medan
+  // VideoView kunde hålla den — "Cannot use shared object that was already
+  // released". Samma fix som i video.tsx.
+  const player = useVideoPlayer(null, p => {
+    p.loop = false;
+  });
+
+  useEffect(() => {
+    if (!recordedUri) return;
+    player
+      .replaceAsync({ uri: recordedUri })
+      .then(() => player.play())
+      .catch(() => {});
+  }, [player, recordedUri]);
 
   // Lyssna på när videon är klar → visa replay-indikator
   useEffect(() => {

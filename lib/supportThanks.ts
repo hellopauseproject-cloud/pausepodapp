@@ -22,6 +22,17 @@ export async function thankSupportResponse(responseId: string, on = true): Promi
   return !error && data === true;
 }
 
+/** Om jag redan hjärtat ett svar jag fått — så att hjärtat står fyllt när
+ *  svaret öppnas igen ur historiken. `false` även om frågan inte gick. */
+export async function hasThankedSupportResponse(responseId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('support_responses')
+    .select('thanked_at')
+    .eq('id', responseId)
+    .maybeSingle();
+  return !error && !!data?.thanked_at;
+}
+
 /** Hjärtan på mina svar som jag inte sett än. Tom lista om SQL:en saknas. */
 export async function fetchUnseenThanks(): Promise<SupportThanks[]> {
   const { data, error } = await supabase.rpc('get_unseen_support_thanks');

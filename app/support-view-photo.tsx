@@ -15,7 +15,8 @@ import { usePalette } from '../contexts/ThemeContext';
 import { SupportHeartButton } from '../components/support-heart-button';
 
 // Samma höjd som PAUSE på Hem.
-const PAUSE_BTN_H = 58;
+// Mindre än PAUSE på Hem: knappen är ett val bland tre, inte sidans huvudsak.
+const PAUSE_BTN_H = 42;
 
 /**
  * Mottagarsidan av ett fotosvar. Bilden och bildtexten kommer var för sig ur
@@ -169,18 +170,19 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   // pausens två streck och displayversaler.
   acceptBtn: {
     backgroundColor: Palette.accent,
+    alignSelf: 'center', paddingHorizontal: 22,
     height: PAUSE_BTN_H, borderRadius: PAUSE_BTN_H / 2,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     marginBottom: 4,
     shadowColor: Palette.accent,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.55,
-    shadowRadius: 22,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
   },
-  pauseGlyph: { flexDirection: 'row', gap: 6 },
-  pauseGlyphBar: { width: 6, height: 18, borderRadius: 3, backgroundColor: Palette.onAccent },
-  acceptText: { color: Palette.onAccent, fontSize: 17, fontWeight: '900', letterSpacing: 2 },
+  pauseGlyph: { flexDirection: 'row', gap: 4 },
+  pauseGlyphBar: { width: 4, height: 12, borderRadius: 2, backgroundColor: Palette.onAccent },
+  acceptText: { color: Palette.onAccent, fontSize: 13, fontWeight: '900', letterSpacing: 1.6 },
   declineBtn: { paddingVertical: 14, alignItems: 'center' },
   declineText: { color: Palette.textSecondary, fontSize: 15 },
 });

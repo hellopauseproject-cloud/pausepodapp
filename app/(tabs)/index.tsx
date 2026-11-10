@@ -96,7 +96,7 @@ const NIGHT_TITLE_H = 44;  // *Ready for bed?* under månen: 28 + marginTop 16
 const SET_GOAL_BTN_H = 46; // `Set a daily goal` / `Finish setting up`
 // Blocket står inte exakt i mitten av ytan: PAUSE ska inte hamna för långt ner,
 // så ytan räknas så här mycket kortare nedtill.
-const BLOCK_LIFT = 64;
+const BLOCK_LIFT = 42;
 // Luften mellan topbaren och platsen för Global Pause-raden.
 const GLOBAL_LINE_GAP = 12;
 const RING_MAX = 280;
@@ -155,7 +155,9 @@ const HOME_RING_MAX = 230;
 // (lib/homeMode.ts, lib/sleep.ts). Den står alltid där, så den räknas in i
 // heronens extras som vilken rad som helst — annars äter den golvet.
 const MODE_PILL_W = 200;
-const MODE_PILL_GAP = 18;
+// Höjdes från 18 tillsammans med att `BLOCK_LIFT` sänktes lika mycket: kapseln
+// står kvar, och hälsningen och allt under den flyttar ner.
+const MODE_PILL_GAP = 40;
 const MODE_PILL_H = 38 + MODE_PILL_GAP; // segmented-pill.tsx: HEIGHT 38
 const MODE_OPTIONS: [{ key: HomeMode; label: string }, { key: HomeMode; label: string }] = [
   { key: 'day', label: 'Day' },

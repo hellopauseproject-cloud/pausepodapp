@@ -13,6 +13,7 @@ import { CIRCLE_MAX_PER_USER, getMyCircles } from '../../lib/circles';
 import { useHomeMode } from '../../lib/homeMode';
 import { countOpenPauseInvites } from '../../lib/pauseInvites';
 import { supabase } from '../../lib/supabase';
+import { fetchSealedSupport } from '../../lib/supportSealed';
 import { unopenedResponsesQuery } from '../../lib/supportStories';
 import { usePalette, useTheme } from '../../contexts/ThemeContext';
 import { RoomName, roomPalette } from '../../constants/appTheme';
@@ -160,10 +161,19 @@ export default function TabLayout() {
   // start. Nu bor de i Community, så de måste räknas in i flikens badge —
   // annars ser man dem bara om man råkar gå dit. Svaren överlever
   // förfrågan, så alla egna stories räknas — också utgångna och borttagna.
+  // De förseglade räknas också: SELECT-policyn gömmer dem för frågan ovan
+  // tills en paus låst upp dem, men fliken visar dem i samma kuvertrad, och
+  // brickan räknar det fliken visar. De kommer ur `get_sealed_support`, och
+  // ett upplåst kuvert flyttar från den listan till frågan ovan — inget räknas
+  // två gånger.
   const fetchMessageCount = () => {
     if (!user) { setMessageCount(0); return; }
-    unopenedResponsesQuery(user.id, 'id', { count: 'exact', head: true })
-      .then(({ count }) => setMessageCount(count ?? 0));
+    Promise.all([
+      unopenedResponsesQuery(user.id, 'id', { count: 'exact', head: true }),
+      fetchSealedSupport(),
+    ])
+      .then(([{ count }, sealed]) => setMessageCount((count ?? 0) + sealed.length))
+      .catch(() => {});
   };
 
   /**

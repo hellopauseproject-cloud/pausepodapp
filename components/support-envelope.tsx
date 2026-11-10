@@ -6,7 +6,7 @@ import Reanimated, {
   Easing, interpolate, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue,
   withDelay, withRepeat, withSequence, withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, Defs, Line, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, Line, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 import { AppPalette, alpha } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { useHand } from '../lib/handFont';
@@ -53,6 +53,12 @@ export const ENVELOPE = {
   // Sigillet på ett kuvert som öppnas efter en paus: appens accent, samma blå
   // som PAUSE-knappen.
   pauseSeal: '#2e86de',
+  // Sigillens glas (SealFace): en ljus punkt uppe till vänster, grundtonen,
+  // och en djup ton i kanten — terrakotta för hjärtat, blått för pausen.
+  sealLight: '#f2b08e',
+  sealDeep: '#8a3f22',
+  pauseSealLight: '#a8d4ff',
+  pauseSealDeep: '#134a87',
   sealMark: '#fff7f0',
 };
 
@@ -89,6 +95,8 @@ const CORNER_R = 12;
 const TIP_R = 9;
 // Hur långt under fliken dess mjuka skugga når.
 const FLAP_SHADOW = 4;
+// Sigillets mjuka skugga är större än sigillet, så att den tonar ut runt det.
+const SEAL_SHADOW = 64;
 
 type Pt = [number, number];
 
@@ -132,11 +140,27 @@ const FLAP_MS = 420;
 const LETTER_MS = 620;
 const SINK_MS = 420;
 
+/**
+ * Kuvertets höjd och luften ovanför det (`rise`), som komponenten reserverar
+ * i sin egen höjd för brevet att glida upp i. Den som placerar kuvertet ska
+ * räkna med dem härifrån — luften är osynlig, men den flyttar kuvertet nedåt.
+ */
+export function envelopeMetrics(width: number) {
+  const H = Math.round(width * 0.64);
+  return { H, rise: Math.round(H * 0.95) };
+}
+
 export function SupportEnvelope({
   width, senderName, senderAvatarUrl, kind, previewText, photoUrl, open, onOpened, sealed = false,
+  invite = false,
 }: {
-  /** Öppnas efter en paus: blått sigill med pausens två streck. Går inte att öppna här. */
+  /** Öppnas efter en paus: blått sigill med pausens två streck. Går inte att
+   *  bryta här; ett tryck tar fram PAUSE-knappen (app/support-arrived.tsx). */
   sealed?: boolean;
+  /** Kuvertet står i mitten och väntar på ett tryck: sigillet slår ett
+   *  hjärtslag med jämna mellanrum och en ring slår ut ur det — det är
+   *  kuvertet som är knappen, och sigillet säger var man trycker. */
+  invite?: boolean;
   width: number;
   senderName: string;
   senderAvatarUrl: string | null;
@@ -153,13 +177,12 @@ export function SupportEnvelope({
   const reduceMotion = useReducedMotion();
 
   const W = width;
-  const H = Math.round(width * 0.64);
+  // Hur högt brevet glider (`rise`): tillräckligt för att det mesta av det
+  // står fritt ovanför kuvertet, och resten fortfarande ser instoppat ut.
+  const { H, rise: LETTER_RISE } = envelopeMetrics(width);
   const FLAP_H = Math.round(H * 0.56);
   const LETTER_INSET = Math.round(W * 0.06);
   const LETTER_H = Math.round(H * 1.15);
-  // Hur högt brevet glider: tillräckligt för att det mesta av det står fritt
-  // ovanför kuvertet, och resten fortfarande ser instoppat ut.
-  const LETTER_RISE = Math.round(H * 0.95);
 
   const styles = useMemo(
     () => makeStyles(Palette, W, H, FLAP_H, LETTER_INSET, LETTER_H, LETTER_RISE),
@@ -172,6 +195,38 @@ export function SupportEnvelope({
   const bob = useSharedValue(0);
   const sealPop = useSharedValue(0);
   const crack = useSharedValue(0);
+  const beat = useSharedValue(0);
+  const halo = useSharedValue(0);
+
+  // Hjärtslaget: två slag (dunk-dunk) och sedan vila, med en ring som slår ut
+  // ur sigillet på första slaget. Bara på det kuvert som väntar på ett tryck —
+  // också det förseglade, vars sigill tar fram PAUSE-knappen.
+  const beckon = invite && !open && !reduceMotion;
+  useEffect(() => {
+    if (!beckon) {
+      beat.value = withTiming(0, { duration: 150 });
+      halo.value = 0;
+      return;
+    }
+    beat.value = withDelay(500, withRepeat(
+      withSequence(
+        withTiming(1, { duration: 150, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: 170, easing: Easing.in(Easing.quad) }),
+        withTiming(0.6, { duration: 130, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: 220, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: 1700 }),
+      ),
+      -1,
+    ));
+    halo.value = withDelay(500, withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1100, easing: Easing.out(Easing.cubic) }),
+        withTiming(0, { duration: 0 }),
+        withTiming(0, { duration: 1270 }),
+      ),
+      -1,
+    ));
+  }, [beckon, beat, halo]);
 
   // Ett lugnt gupp medan kuvertet väntar. Det är det enda som säger "öppna
   // mig" utan en ringsignal, och det stannar när öppningen börjar.
@@ -226,7 +281,17 @@ export function SupportEnvelope({
   // Hela sigillet sväller, och de två halvorna faller sedan isär åt var sitt
   // håll: utåt, nedåt, vridna, och tonar bort.
   const sealStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + 0.18 * sealPop.value * (1 - crack.value) }],
+    transform: [{ scale: 1 + (0.18 * sealPop.value + 0.12 * beat.value) * (1 - crack.value) }],
+  }));
+  const haloStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(halo.value, [0, 0.1, 1], [0, 0.55, 0]) * (1 - sealPop.value),
+    transform: [{ scale: interpolate(halo.value, [0, 1], [0.9, 1.9]) }],
+  }));
+  // Skuggan under sigillet, som får det att ligga ovanpå fliken; den följer
+  // med slaget och försvinner när sigillet spricker.
+  const sealShadowStyle = useAnimatedStyle(() => ({
+    opacity: 1 - crack.value,
+    transform: [{ scale: 1 + 0.12 * beat.value }],
   }));
   const halfLeftStyle = useAnimatedStyle(() => ({
     opacity: interpolate(crack.value, [0, 0.15, 1], [1, 1, 0]),
@@ -387,15 +452,72 @@ export function SupportEnvelope({
       {/* Sigillet: ett hjärta där flikens spets möter fickan. Det är ritat
           två gånger, var och en klippt till sin halva, så att det kan spricka
           mitt itu när kuvertet öppnas. */}
+      <Reanimated.View style={[styles.sealShadow, { top: FLAP_H - 24 + 3 }, sealShadowStyle]} pointerEvents="none">
+        <Svg width={SEAL_SHADOW} height={SEAL_SHADOW}>
+          <Defs>
+            <RadialGradient id="sealShadow" cx="50%" cy="50%" r="50%">
+              <Stop offset="0.55" stopColor={ENVELOPE.shade} stopOpacity={0.32} />
+              <Stop offset="1" stopColor={ENVELOPE.shade} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Circle cx={SEAL_SHADOW / 2} cy={SEAL_SHADOW / 2} r={SEAL_SHADOW / 2} fill="url(#sealShadow)" />
+        </Svg>
+      </Reanimated.View>
+      <Reanimated.View
+        style={[styles.sealHalo, { top: FLAP_H - 24, borderColor: sealed ? ENVELOPE.pauseSeal : ENVELOPE.seal }, haloStyle]}
+        pointerEvents="none"
+      />
       <Reanimated.View style={[styles.seal, { top: FLAP_H - 24 }, sealStyle]} pointerEvents="none">
         <Reanimated.View style={[styles.sealHalf, halfLeftStyle]}>
-          <View style={[styles.sealDisc, sealed && styles.sealDiscPause]}>{sealMark}</View>
+          <View style={[styles.sealDisc, sealed && styles.sealDiscPause]}>
+            <SealFace sealed={sealed} />{sealMark}
+          </View>
         </Reanimated.View>
         <Reanimated.View style={[styles.sealHalf, halfRightStyle]}>
-          <View style={[styles.sealDisc, sealed && styles.sealDiscPause, { left: -24 }]}>{sealMark}</View>
+          <View style={[styles.sealDisc, sealed && styles.sealDiscPause, { left: -24 }]}>
+            <SealFace sealed={sealed} />{sealMark}
+          </View>
         </Reanimated.View>
       </Reanimated.View>
     </Reanimated.View>
+  );
+}
+
+/**
+ * Sigillets yta, så att det läser som en blank knapp och inte som en platt
+ * skiva: en radiell toning från en ljus punkt uppe till vänster till en djup
+ * kant, en kant som är ljus upptill och mörk nedtill, en svag fasning innanför
+ * den, en glans över övre halvan och en liten skarp reflex — samma recept som
+ * nivåmärkena (components/circle-level-badge.tsx). Terrakotta på hjärtat,
+ * blått på pausens sigill.
+ */
+function SealFace({ sealed }: { sealed: boolean }) {
+  const light = sealed ? ENVELOPE.pauseSealLight : ENVELOPE.sealLight;
+  const base = sealed ? ENVELOPE.pauseSeal : ENVELOPE.seal;
+  const deep = sealed ? ENVELOPE.pauseSealDeep : ENVELOPE.sealDeep;
+  return (
+    <Svg width={48} height={48} style={StyleSheet.absoluteFill}>
+      <Defs>
+        <RadialGradient id="pauseSealBody" cx="34%" cy="28%" r="78%">
+          <Stop offset="0" stopColor={light} />
+          <Stop offset="0.42" stopColor={base} />
+          <Stop offset="1" stopColor={deep} />
+        </RadialGradient>
+        <LinearGradient id="pauseSealRim" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#ffffff" stopOpacity={0.75} />
+          <Stop offset="1" stopColor={deep} stopOpacity={0.9} />
+        </LinearGradient>
+        <LinearGradient id="pauseSealGloss" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#ffffff" stopOpacity={0.6} />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity={0} />
+        </LinearGradient>
+      </Defs>
+      <Circle cx={24} cy={24} r={24} fill="url(#pauseSealBody)" />
+      <Circle cx={24} cy={24} r={23} fill="none" stroke="url(#pauseSealRim)" strokeWidth={2} />
+      <Circle cx={24} cy={24} r={19.5} fill="none" stroke="#ffffff" strokeOpacity={0.28} strokeWidth={1} />
+      <Ellipse cx={24} cy={14} rx={15} ry={9} fill="url(#pauseSealGloss)" />
+      <Circle cx={14.5} cy={12.5} r={2.4} fill="#ffffff" fillOpacity={0.9} />
+    </Svg>
   );
 }
 
@@ -444,17 +566,32 @@ const makeStyles = (
     left: W / 2 - 24, width: 48, height: 48,
     flexDirection: 'row',
   },
+  sealShadow: {
+    position: 'absolute', left: W / 2 - SEAL_SHADOW / 2,
+    width: SEAL_SHADOW, height: SEAL_SHADOW, marginTop: -(SEAL_SHADOW - 48) / 2,
+  },
+  sealHalo: {
+    position: 'absolute', left: W / 2 - 24, width: 48, height: 48, borderRadius: 24,
+    borderWidth: 2,
+  },
   sealHalf: { width: 24, height: 48, overflow: 'hidden' },
+  // Kanten ritas av SealFace; en ram här hade lagt sig utanför glaset.
   sealDisc: {
     position: 'absolute', top: 0, left: 0,
     width: 48, height: 48, borderRadius: 24,
     backgroundColor: ENVELOPE.seal,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: alpha('#ffffff', 0.7),
   },
   // Hjärtats tyngd ligger lågt i glyfen; en punkt upp står det mitt i skivan.
-  sealHeart: { marginTop: 1 },
+  sealHeart: {
+    marginTop: 1,
+    textShadowColor: alpha(ENVELOPE.sealDeep, 0.7), textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2,
+  },
   sealDiscPause: { backgroundColor: ENVELOPE.pauseSeal },
   pauseMark: { flexDirection: 'row', gap: 5 },
-  pauseMarkBar: { width: 5, height: 17, borderRadius: 2.5, backgroundColor: ENVELOPE.sealMark },
+  pauseMarkBar: {
+    width: 5, height: 17, borderRadius: 2.5, backgroundColor: ENVELOPE.sealMark,
+    shadowColor: ENVELOPE.pauseSealDeep, shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.6, shadowRadius: 1.5,
+  },
 });

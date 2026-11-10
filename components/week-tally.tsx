@@ -20,8 +20,9 @@ import { TallyRod } from './tally-rod';
  * i hörnet). Hörnet är lugnt: *THIS WEEK* i designsystemets glesa versaler
  * och under det en enda rad korta **platta, rundade streck**
  * (components/tally-rod.tsx) i rummets kulör, ett per taggad paus sedan
- * måndag. Intentionerna skiljs bara åt av en lite större lucka. Inga
- * emojier och inga kulörer — hörnet antyder. (Strecken var först glas i
+ * måndag, alla med samma lucka (en större lucka mellan intentionerna
+ * prövades och föll på begäran: strecken lästes två och två). Inga emojier
+ * och inga kulörer — hörnet antyder. (Strecken var först glas i
  * PAUSE-knappens material; det föll på begäran.)
  *
  * **Kulören bor inuti.** Ett tryck öppnar arket, där veckan står ordentligt:
@@ -47,8 +48,6 @@ import { TallyRod } from './tally-rod';
 const ROD_W = 5;
 const ROD_H = 18;
 const ROD_GAP = 4;
-// Luckan mellan två intentioner — det enda som skiljer dem åt i hörnet.
-const GROUP_GAP = 11;
 // Fler streck än så blir `+N`, så att raden inte växer in under PAUSE.
 const MAX_RODS = 14;
 /** Hörnets avstånd från skärmens nederkant (flikraden). */
@@ -168,10 +167,10 @@ export function WeekTally({ userId, refreshKey, onHeight }: {
       >
         <Text style={[styles.kicker, { color: Palette.textTertiary }]}>THIS WEEK</Text>
         <View style={styles.rods}>
-          {groups.map((g, gi) => {
+          {groups.map(g => {
             const f = fresh[g.row.category.id];
             return (
-              <View key={g.row.category.id} style={[styles.group, gi > 0 && { marginLeft: GROUP_GAP }]}>
+              <View key={g.row.category.id} style={styles.group}>
                 {Array.from({ length: g.shown }, (_, i) => {
                   const isNew = !!f && i >= f.from;
                   const id = `${g.row.category.id}-${i}`;
@@ -254,9 +253,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4, paddingRight: 10, gap: 7,
   },
   kicker: { fontSize: 11, lineHeight: 13, fontWeight: '900', letterSpacing: 2.2 },
-  rods: { flexDirection: 'row', alignItems: 'flex-end' },
+  rods: { flexDirection: 'row', alignItems: 'flex-end', gap: ROD_GAP },
   group: { flexDirection: 'row', gap: ROD_GAP },
-  more: { fontSize: 11, lineHeight: 14, fontWeight: '700', marginLeft: 8 },
+  more: { fontSize: 11, lineHeight: 14, fontWeight: '700', marginLeft: 4 },
 });
 
 const makeSheetStyles = (Palette: AppPalette) => StyleSheet.create({

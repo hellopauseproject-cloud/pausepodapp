@@ -1,4 +1,3 @@
-import { FontAwesome } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -10,9 +9,12 @@ import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
 import { closeSupportViewer } from '../lib/supportOpen';
 import { clearPending, getPending } from '../lib/supportQueue';
-import { AppPalette, Radius } from '../constants/appTheme';
+import { AppPalette } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { SupportHeartButton } from '../components/support-heart-button';
+import { PauseButtonFace } from '../components/pause-button-face';
+
+const PAUSE_BTN_H = 36;
 
 export default function VideoScreen() {
   const Palette = usePalette();
@@ -68,25 +70,28 @@ export default function VideoScreen() {
     return () => clearTimeout(pauseTimer);
   }, []);
 
-  const player = useVideoPlayer(
-    videoReady && videoUri ? { uri: videoUri } : null,
-    (player) => {
-      if (videoReady && videoUri) player.play();
-    }
-  );
+  // En spelare för skärmens hela liv, och källan läggs i den med
+  // replaceAsync. Med källan som argument till useVideoPlayer byggdes en ny
+  // spelare när url:en kom (null → uri) och den första släpptes medan
+  // VideoView fortfarande höll den — "Cannot use shared object that was
+  // already released" när videon spelades om.
+  const player = useVideoPlayer(null);
 
   useEffect(() => {
     if (!videoReady || !videoUri) return;
     videoEndedRef.current = false;
-    player.play();
     const subscription = player.addListener('playToEnd', () => {
       videoEndedRef.current = true;
       setShowReplay(true);
     });
+    player
+      .replaceAsync({ uri: videoUri })
+      .then(() => player.play())
+      .catch(() => {});
     return () => {
       subscription.remove();
     };
-  }, [videoReady, videoUri]);
+  }, [player, videoReady, videoUri]);
 
   const handleClose = async () => {
     if (videoUri) player.pause();
@@ -153,7 +158,11 @@ export default function VideoScreen() {
         {showPauseLink && (
           <Animated.View style={{ opacity: fadeAnim }}>
             <TouchableOpacity style={styles.pauseBtn} onPress={handlePauseLink} activeOpacity={0.85}>
-              <FontAwesome name="pause" size={16} color="white" />
+              <PauseButtonFace radius={PAUSE_BTN_H / 2} />
+              <View style={styles.pauseGlyph}>
+                <View style={styles.pauseGlyphBar} />
+                <View style={styles.pauseGlyphBar} />
+              </View>
               <Text style={styles.pauseBtnText}>TAKE A PAUSE</Text>
             </TouchableOpacity>
           </Animated.View>
@@ -213,22 +222,22 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Samma knapp som PAUSE på Hem (app/(tabs)/index.tsx) och i
+  // support-view-photo.tsx, men mindre: videon ska ta platsen.
   pauseBtn: {
     backgroundColor: Palette.accent,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: Radius.pill,
-    ...Palette.cardShadow,
+    height: PAUSE_BTN_H, borderRadius: PAUSE_BTN_H / 2,
+    paddingHorizontal: 18,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    shadowColor: Palette.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  pauseBtnText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: 3,
-  },
+  pauseGlyph: { flexDirection: 'row', gap: 3 },
+  pauseGlyphBar: { width: 3, height: 10, borderRadius: 1.5, backgroundColor: Palette.onAccent },
+  pauseBtnText: { color: Palette.onAccent, fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
   closeBtn: { paddingVertical: 10, paddingHorizontal: 20 },
   closeText: { color: 'rgba(255,255,255,0.8)', fontSize: 15, fontWeight: '600' },
   callerOverlay: {
