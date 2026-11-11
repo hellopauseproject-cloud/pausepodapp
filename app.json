@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Pause Pod",
+    "name": "PausePod",
     "slug": "Pause-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -106,14 +106,14 @@
       [
         "expo-sensors",
         {
-          "motionPermission": "Pause Pod uses the motion sensor to know when your phone is resting face down during a pause, and when it is placed in or taken out of the box."
+          "motionPermission": "PausePod uses the motion sensor to know when your phone is resting face down during a pause, and when it is placed in or taken out of the box."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Pause Pod needs the camera so you can send friends video and photo support.",
-          "microphonePermission": "Pause Pod needs the microphone so you can send friends voice and video support.",
+          "cameraPermission": "PausePod needs the camera so you can send friends video and photo support.",
+          "microphonePermission": "PausePod needs the microphone so you can send friends voice and video support.",
           "recordAudioAndroid": true
         }
       ]

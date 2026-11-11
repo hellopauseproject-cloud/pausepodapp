@@ -672,7 +672,7 @@ function StatsScreen() {
                   setFlippedId(flippedId === s.id ? null : s.id);
                   if (editingTagId === s.id) setEditingTagId(null);
                 }}
-                accessibilityLabel={`${fmtDur(s.durationSecs)} pause${isPod ? ' in the Pause Pod' : ''}${cat ? `, ${cat.label.toLowerCase()}` : ''}. ${s.startedAt ? fmtDate(s.startedAt) : ''}`}
+                accessibilityLabel={`${fmtDur(s.durationSecs)} pause${isPod ? ' in the PausePod' : ''}${cat ? `, ${cat.label.toLowerCase()}` : ''}. ${s.startedAt ? fmtDate(s.startedAt) : ''}`}
                 backStyle={[styles.sessionBack, { borderColor: cardBorder }]}
                 backTint={alpha(tone, Palette.mode === 'dark' ? 0.16 : 0.11)}
                 back={<PauseCardBack s={s} cat={cat} tone={tone} all={factSessions} quoteIndex={quoteIndex[s.id] ?? 0} styles={styles} />}

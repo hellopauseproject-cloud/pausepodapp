@@ -66,7 +66,7 @@ async function invokeClaim(code: string, preview: boolean): Promise<ClaimRespons
 
 export async function previewTagPairing(code: string): Promise<PairPreview> {
   const res = await invokeClaim(code, true);
-  if (res.ok) return { ok: true, boxName: res.box_name ?? 'Pause Pod' };
+  if (res.ok) return { ok: true, boxName: res.box_name ?? 'PausePod' };
   return { ok: false, error: res.error ?? 'network' };
 }
 

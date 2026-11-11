@@ -22,7 +22,7 @@ export function StepWelcome({ onNext }: { onNext: () => void }) {
 
   return (
     <IntroStep
-      title={'Welcome to\nPause Pod'}
+      title={'Welcome to\nPausePod'}
       subtitle="Two short steps."
       primaryLabel="Get started →"
       onPrimary={onNext}

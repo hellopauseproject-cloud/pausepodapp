@@ -4,7 +4,7 @@
 -- Boxar. Varje box har en hemlig nyckel, här sparas bara dess SHA-256-hash.
 create table if not exists public.boxes (
   id            text primary key,                 -- t.ex. 'BOX001'
-  name          text not null default 'Pause Pod',
+  name          text not null default 'PausePod',
   key_hash      text not null,
   active        boolean not null default true,
   created_at    timestamptz not null default now(),

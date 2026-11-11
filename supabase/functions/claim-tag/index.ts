@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
   }
 
   // deno-lint-ignore no-explicit-any
-  const boxName = (pairing as any).boxes?.name ?? "Pause Pod";
+  const boxName = (pairing as any).boxes?.name ?? "PausePod";
   if (body.preview) return json({ ok: true, status: "valid", box_name: boxName });
 
   // ---- Lås koden först, så att två telefoner inte kan ta samma kod ----

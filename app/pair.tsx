@@ -1,4 +1,5 @@
 import { FontAwesome5 } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -12,8 +13,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PauseButtonFace } from '../components/pause-button-face';
+import { PauseTagBadge } from '../components/pause-tag-badge';
+import { roomShell, ScreenBackground } from '../components/screen-background';
+import { AppPalette, Radius, Spacing } from '../constants/appTheme';
 import { useAuth } from '../contexts/AuthContext';
+import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { track } from '../lib/analytics';
+import { supabase } from '../lib/supabase';
 import {
   claimTagPairing,
   normalizePairCode,
@@ -22,9 +29,6 @@ import {
   previewTagPairing,
   setPendingPairCode,
 } from '../lib/tagPairing';
-import { AppPalette, Radius, Spacing } from '../constants/appTheme';
-import { RoomProvider, usePalette } from '../contexts/ThemeContext';
-import { roomShell, ScreenBackground } from '../components/screen-background';
 import DismissKeyboardView from './components/DismissKeyboardView';
 
 /**
@@ -36,6 +40,12 @@ import DismissKeyboardView from './components/DismissKeyboardView';
  *
  * Skärmen frågar först (`preview`) och kopplar först efter ett ja, så att en
  * skannad kod aldrig gör något man inte sett.
+ *
+ * Frågan gäller **taggen**, inte telefonen. Den hette *Is this your phone?*,
+ * men man håller redan telefonen man skannade med, så frågan gick inte att
+ * förstå. Nu ger skanningen ett kvitto — en haptik och taggen som poppar fram
+ * (`PauseTagBadge`) — och raden säger vad ett ja leder till: lådan säger
+ * *HI, <NAMN>* med användarnamnet, samma som lådan själv visar.
  */
 export default function PairRoom() {
   return (
@@ -66,6 +76,17 @@ function PairScreen() {
 
   const [code, setCode] = useState(linkCode);
   const [step, setStep] = useState<Step>(linkCode ? { kind: 'checking' } : { kind: 'enter' });
+  const [name, setName] = useState<string | null>(null);
+
+  // Samma namn som lådan säger hi med (`profiles.username`), som på app/pod.tsx.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    supabase.from('profiles').select('username').eq('id', user.id).maybeSingle()
+      .then(({ data }) => { if (alive && data?.username) setName(data.username); });
+    return () => { alive = false; };
+  }, [user]);
+  const hi = name ? `HI, ${name.toUpperCase()}` : 'hi';
 
   // Utloggad: parkera koden, grinden i _layout tar upp den efter inloggningen.
   useEffect(() => {
@@ -78,6 +99,9 @@ function PairScreen() {
     if (c.length < 6) return;
     setStep({ kind: 'checking' });
     const res = await previewTagPairing(c);
+    Haptics.notificationAsync(
+      res.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error,
+    ).catch(() => {});
     setStep(res.ok ? { kind: 'confirm', boxName: res.boxName } : { kind: 'error', error: res.error });
   }, []);
 
@@ -91,6 +115,7 @@ function PairScreen() {
     const res = await claimTagPairing(normalizePairCode(code));
     if (res.ok) {
       track('pause_tag_paired', { already_yours: res.alreadyYours });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setStep({ kind: 'done', alreadyYours: res.alreadyYours });
     } else {
       setStep({ kind: 'error', error: res.error });
@@ -150,27 +175,37 @@ function PairScreen() {
 
         {(step.kind === 'confirm' || step.kind === 'claiming') && (
           <View style={styles.block}>
-            <Text style={styles.title}>Is this your phone?</Text>
-            <Text style={styles.subtitle}>
-              The tag on it will be yours. Next time the box says hi.
+            <View style={styles.badge}>
+              <PauseTagBadge checked={false} />
+            </View>
+            <Text style={[styles.title, styles.centered]}>Tag found.</Text>
+            <Text style={[styles.subtitle, styles.centered]}>
+              Tag registered in {step.boxName}. Is it yours? 
             </Text>
-            <Text style={styles.meta}>{step.boxName}</Text>
             <PrimaryButton
-              label="YES, IT'S MINE"
+              label="IT'S MY PHONE"
+              pauseFace
               busy={step.kind === 'claiming'}
               onPress={confirm}
               styles={styles}
             />
             <TouchableOpacity onPress={leave} style={styles.secondary} disabled={step.kind === 'claiming'}>
-              <Text style={styles.secondaryText}>Not my phone</Text>
+              <Text style={styles.secondaryText}>Not mine</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {step.kind === 'done' && (
           <View style={styles.block}>
-            <Text style={styles.title}>{step.alreadyYours ? 'Already yours.' : 'Tag registered.'}</Text>
-            <Text style={styles.subtitle}>Put your phone back in the box.</Text>
+            <View style={styles.badge}>
+              <PauseTagBadge checked />
+            </View>
+            <Text style={[styles.title, styles.centered]}>
+              {step.alreadyYours ? 'Already yours.' : "It's yours."}
+            </Text>
+            <Text style={[styles.subtitle, styles.centered]}>
+              Put your phone back in the box. It will say {hi}.
+            </Text>
             <PrimaryButton label="DONE" onPress={() => router.replace('/(tabs)' as never)} styles={styles} />
           </View>
         )}
@@ -199,12 +234,15 @@ function PrimaryButton({
   onPress,
   disabled,
   busy,
+  pauseFace,
   styles,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   busy?: boolean;
+  /** PAUSE-knappens material från Hem i stället för platt accent. */
+  pauseFace?: boolean;
   styles: ReturnType<typeof makeStyles>;
 }) {
   const Palette = usePalette();
@@ -216,6 +254,7 @@ function PrimaryButton({
       activeOpacity={0.85}
       accessibilityRole="button"
     >
+      {pauseFace && <PauseButtonFace radius={28} />}
       {busy ? <ActivityIndicator color={Palette.onAccent} /> : <Text style={styles.primaryText}>{label}</Text>}
     </TouchableOpacity>
   );
@@ -242,6 +281,13 @@ const makeStyles = (Palette: AppPalette) =>
     block: {
       gap: 12,
     },
+    badge: {
+      alignSelf: 'center',
+      marginBottom: 4,
+    },
+    centered: {
+      textAlign: 'center',
+    },
     title: {
       fontSize: 36,
       fontWeight: '800',
@@ -254,12 +300,6 @@ const makeStyles = (Palette: AppPalette) =>
       color: Palette.textSecondary,
       letterSpacing: 0.2,
       marginBottom: 12,
-    },
-    meta: {
-      fontSize: 13,
-      color: Palette.textTertiary,
-      letterSpacing: 0.2,
-      marginBottom: 8,
     },
     codeInput: {
       backgroundColor: Palette.surface,

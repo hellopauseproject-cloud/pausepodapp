@@ -667,7 +667,7 @@ garanti som gäller även om introduktionen avbryts.
 > trots filnamnet — den har aldrig varit onboarding och ska inte raderas.
 
 **Lådläget är nedtonat tills lådan finns.** `POD_COMING_SOON` i
-[app/pause.tsx](app/pause.tsx) gör WITH PAUSE POD otryckbar, dämpar den och
+[app/pause.tsx](app/pause.tsx) gör WITH PAUSEPOD otryckbar, dämpar den och
 byter anslutningsraden (`Ready`/`Connect`) mot **COMING SOON**. Allt bakom
 knappen står orört — `sendSetMode`, BLE-kollen, routningen till `/placeinbox`,
 hela `med-låda`-grenen i `handleCheckIn`. Sätt konstanten till `false` och
@@ -883,6 +883,66 @@ tidszon. Raden når alltså kretsen, dagsmålet och **Global Pause** (triggern
   hamna på fel dag och missa (eller träffa) ett Global Pause-fönster.
 - **Ingen intention, ingen "pausing now", ingen sammanfattning.** Appen vet
   inte att pausen pågår; den syns först i statistiken när den laddats upp.
+
+### Lådsidan
+
+**[app/pod.tsx](app/pod.tsx) visar vad lådan är och hur den ställs in**
+(november 2026, på begäran), och nås från *How it works ›* i Settings
+PausePod-del. Den är både en presentation och en bruksanvisning, med flit:
+lådan skickas snart, och den som inte har en ska vilja ha en.
+
+- **Två manus i samma scen**, *How it works* och *Set it up*
+  (`SegmentedPill`). Ritualen är NFC-pausen (lock av, telefon in, lock på,
+  telefon ut, telefonen efteråt); appens lådväg visas inte. *Peek, if you
+  must* (ON HOLD som eget steg) togs bort på begäran — ON HOLD syns ändå en
+  stund när locket lyfts i *Phone out*. **Telefonen vänds innan den läggs
+  ner**: ryggen med taggen syns först, och den ligger med taggen nedåt
+  mot lådans läsare. Taggen är ritad i appikonens stil och sitter längst ner
+  på telefonen (kameran är toppen). **Den klistras på i inställningens
+  steg *Tag on, phone in*** (ritualen visar den redan på plats): kameran går fram till platsen, som skiner, och
+  dekalen kommer ner böjd, tar i med vänsterkanten och rullas fast mot
+  högerkanten (det fasta urklippt fram till kontaktlinjen, resten en lös flik
+  vriden upp kring den) — ett eget lager (`tag`), så att
+  den kan röra sig själv. Inställningen följer
+  firmwaren: **NO WIFI · SCAN TO SET UP** → lådans eget nät och sidan där
+  man väljer WiFi → bocken och **CONNECTED** → taggen på telefonen och telefonen i lådan → **NEW
+  TAG · SCAN TO PAIR** → telefonen ut ur lådan (samma telefon: den lyfta
+  telefonen reser sig och blir attrappen, `morph` i pod-box-stage.tsx, och
+  lägger sig platt igen efteråt), kameran läser koden och
+  öppnar `/pair` (*Tag found.*, *It's yours.*) → telefonen
+  tillbaka, och lådan säger **HI, <NAMN>** → locket på, och den första
+  pausen startar (bocken, **CLOCK ON.**, nedräkningen, märket) som i ritualen.
+- **Lådan är ritad, inte fotograferad** — geometrin i
+  [lib/podBoxArt.ts](lib/podBoxArt.ts) (ren data i snedprojektion, efter
+  fotona: ljus ek med ådring, rundade kanter, skårorna på gaveln, en tunn, platt mörkgrå ram runt displayen;
+  ingen sladd, för lådan behöver ingen) och rörelsen i
+  [components/pod-box-stage.tsx](components/pod-box-stage.tsx). Scenen tar ett
+  *läge* (lock, telefon och vilken sida som är upp, display, kamera) och
+  glider dit; tidslinjen bor i sidan. Kameran zoomar bara in på taggen —
+  aldrig på displayen (på begäran) — första gången telefonen syns, och då
+  pulserar ett sken runt taggen (`tagGlow`) så att det syns vad den pekar
+  på. Allt ritas dubbelt så stort och skalas ner så att det inzoomade är
+  skarpt.
+- **Displayen är firmwarens ord, en stor rad i taget**
+  ([components/pod-screen.tsx](components/pod-screen.tsx)): HI, CLOCK ON.,
+  ON HOLD i honung, den gröna bocken, men kortade så att texten klarar 11 px
+  utan zoom; ett långt namn krymper i stället för att klippas. Ändras en
+  skärm i `.ino`-filen ska den ändras där.
+- Lådan säger **HI** med användarnamnet (`profiles.username`), samma som Hem
+  och samma som lådan själv visar. Inte den lokala profilens namn: det kan
+  skilja sig från användarnamnet. (Ett påhittat *ANNA* prövades och togs
+  bort.)
+- **Ritualen slutar i telefonen** (*Check your phone*,
+  [components/pod-app-peek.tsx](components/pod-app-peek.tsx)): en telefon
+  framför lådan visar Hem, där ringen fylls med pausens tid, och sedan
+  statistiken, som rullar ner till pauskortet med lådan i hörnet. Där
+  mörknar skärmen och den senaste pausen lyfts ur den, förstoras in och ut
+  och får gå utanför skärmens kant (en kopia i telefonens koordinater). Skärmarna
+  ska se ut exakt som appens (på begäran), så de byggs av samma komponenter
+  i telefonens fulla storlek och skalas ner; topbaren, flikraden och
+  pauskortet är avskrivna med samma mått. Ändras Hem eller statistiken ska
+  kopian följa med.
+- Locket är 12 och displayen 20 av kroppens 74 enheter, på begäran.
 
 BLE: Service UUID `12345678-1234-1234-1234-123456789012`,
 Characteristic UUID `abcdefab-cdef-abcd-efab-cdefabcdefab` (notify + write).

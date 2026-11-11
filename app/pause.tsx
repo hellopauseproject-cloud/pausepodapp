@@ -107,7 +107,7 @@ function PauseScreen() {
       // längre än till varningen.
       track('pause_blocked_box_offline', { category: selectedCategory ?? null });
       Alert.alert(
-        'PAUSE POD not connected',
+        'PAUSEPOD not connected',
         'Check that Bluetooth is turned on on your phone and that the box is within range.',
         [{ text: 'OK' }]
       );
@@ -193,7 +193,7 @@ function PauseScreen() {
                 POD_COMING_SOON && styles.modeTitleSoon,
               ]}
             >
-              WITH PAUSE POD
+              WITH PAUSEPOD
             </Text>
             {/* Anslutningsraden säger ingenting medan läget inte går att
                 välja — "Connect" hade varit en uppmaning att göra något som
@@ -226,7 +226,7 @@ function PauseScreen() {
               color={selectedMode === 'utan-låda' ? Palette.hue : Palette.textFaint}
             />
             <Text style={[styles.modeTitle, selectedMode === 'utan-låda' && styles.modeTitleSelected]}>
-              WITHOUT PAUSE POD
+              WITHOUT PAUSEPOD
             </Text>
             <View style={[styles.bleRow, { opacity: selectedMode === 'utan-låda' ? 1 : 0.3 }]}>
               <Text style={styles.bleSmallText}>Anywhere</Text>

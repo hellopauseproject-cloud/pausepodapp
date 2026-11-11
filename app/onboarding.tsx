@@ -153,6 +153,15 @@ function SettingsScreen() {
         <View style={styles.podTitleRow}>
           <PodBoxIcon width={40} />
           <Text style={[styles.sectionTitle, styles.podTitle]}>PausePod</Text>
+          {/* Lådsidan: vad lådan är och hur den ställs in (app/pod.tsx). */}
+          <TouchableOpacity
+            style={styles.podHow}
+            onPress={() => router.push('/pod' as never)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+          >
+            <Text style={styles.podHowText}>How it works ›</Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.sectionSubtitle}>
           {myTags && myTags.length > 0
@@ -249,6 +258,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   },
   podTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   podTitle: { marginBottom: 0 },
+  podHow: { marginLeft: 'auto' },
+  podHowText: { fontSize: 14, fontWeight: '600', color: Palette.hue },
   sectionSubtitle: {
     fontSize: 14,
     color: Palette.textSecondary,
