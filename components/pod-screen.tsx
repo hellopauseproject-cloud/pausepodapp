@@ -82,7 +82,7 @@ function ScreenBody({ id, u, name, width, height }: { id: PodScreenId; u: U; nam
     case 'done':
       return (
         <>
-          <Heavy u={u} size={43} color={HONEY}>DONE</Heavy>
+          <Heavy u={u} size={43} color={GREEN}>DONE</Heavy>
           <Heavy u={u} size={44} style={{ marginLeft: u(16) }}>42:18</Heavy>
         </>
       );
@@ -229,7 +229,7 @@ function CheckStatic({ u, r }: { u: U; r: number }) {
   );
 }
 
-/** 00:01–00:03 efter CLOCK ON., en sekund i taget (lådan räknar till 5, `COUNT_SECONDS`; sidan kortar till 3 på begäran). */
+/** 00:01–00:03 direkt efter bocken (lådan visar CLOCK ON. emellan; sidan hoppar över den på begäran), en sekund i taget (lådan räknar till 5, `COUNT_SECONDS`; sidan kortar till 3 på begäran). */
 function Count({ u }: { u: U }) {
   const [n, setN] = useState(1);
   useEffect(() => {

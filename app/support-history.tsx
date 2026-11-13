@@ -12,6 +12,7 @@ import { AppPalette, Spacing } from '../constants/appTheme';
 import { useAuth } from '../contexts/AuthContext';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
+import { signSupportMediaUrls } from '../lib/supportMedia';
 import { OpenableSupport, openSupportResponse } from '../lib/supportOpen';
 import {
   fetchSentSupport, recentSupportQuery, SentSupport, SUPPORT_HISTORY_MS,
@@ -88,16 +89,19 @@ function SupportHistoryScreen() {
       if (!alive) return;
       const rows = error || !data ? [] : data;
       const senderIds = [...new Set(rows.map(r => r.sender_id))];
-      const { data: senders } = senderIds.length
-        ? await supabase.from('profiles').select('id, username, avatar_url').in('id', senderIds)
-        : { data: [] as { id: string; username: string; avatar_url: string | null }[] };
+      const [{ data: senders }, signed] = await Promise.all([
+        senderIds.length
+          ? supabase.from('profiles').select('id, username, avatar_url').in('id', senderIds)
+          : Promise.resolve({ data: [] as { id: string; username: string; avatar_url: string | null }[] }),
+        signSupportMediaUrls(rows.map(r => r.content_url)),
+      ]);
       if (!alive) return;
       const byId = new Map((senders ?? []).map(s => [s.id, s]));
       const receivedList: Received[] = rows.map(r => ({
         id: r.id,
         storyId: r.story_id,
         kind: r.response_type as SupportKind,
-        contentUrl: r.content_url,
+        contentUrl: r.content_url ? signed.get(r.content_url) ?? r.content_url : null,
         textContent: r.text_content,
         captionY: r.caption_y,
         senderName: byId.get(r.sender_id)?.username ?? 'A friend',

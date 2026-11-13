@@ -15,6 +15,7 @@ import { envelopeMetrics, SupportEnvelope, SupportKind } from '../components/sup
 import { PauseButtonFace } from '../components/pause-button-face';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
+import { signSupportMediaUrls } from '../lib/supportMedia';
 import { OpenableSupport, openSupportResponse } from '../lib/supportOpen';
 import { fetchSealedSupport, setEnvelopeAfterPause, SUPPORT_UNLOCK_MIN_MINUTES } from '../lib/supportSealed';
 import { unopenedResponsesQuery } from '../lib/supportStories';
@@ -146,9 +147,12 @@ function SupportArrivedScreen() {
       ]);
       const rows = data ?? [];
       const senderIds = [...new Set(rows.map(r => r.sender_id))];
-      const { data: senders } = senderIds.length
-        ? await supabase.from('profiles').select('id, username, avatar_url').in('id', senderIds)
-        : { data: [] as { id: string; username: string; avatar_url: string | null }[] };
+      const [{ data: senders }, signed] = await Promise.all([
+        senderIds.length
+          ? supabase.from('profiles').select('id, username, avatar_url').in('id', senderIds)
+          : Promise.resolve({ data: [] as { id: string; username: string; avatar_url: string | null }[] }),
+        signSupportMediaUrls(rows.map(r => r.content_url)),
+      ]);
       if (!alive) return;
       const byId = new Map((senders ?? []).map(s => [s.id, s]));
       // De som går att öppna nu först, de förseglade sist — i varje grupp det
@@ -158,7 +162,7 @@ function SupportArrivedScreen() {
           id: r.id,
           storyId: r.story_id,
           kind: r.response_type as SupportKind,
-          contentUrl: r.content_url,
+          contentUrl: r.content_url ? signed.get(r.content_url) ?? r.content_url : null,
           textContent: r.text_content,
           captionY: r.caption_y,
           senderName: byId.get(r.sender_id)?.username ?? 'A friend',

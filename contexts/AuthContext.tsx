@@ -13,7 +13,7 @@ type AuthContextType = {
   loading: boolean;
   onboardingCompleted: boolean | null;
   completeOnboarding: () => Promise<void>;
-  signUp: (email: string, password: string, username: string) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
+  signUp: (email: string, password: string, username?: string) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 };
@@ -146,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ensureProfile();
   }, [user]);
 
-  const signUp = async (email: string, password: string, username: string) => {
+  const signUp = async (email: string, password: string, username?: string) => {
     // Frågan ställs FÖRE kontot skapas, och det är hela poängen.
     //
     // Profilraden skrivs av triggern `on_auth_user_created` i samma
@@ -161,14 +161,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     //
     // `null` betyder att frågan inte gick att ställa — då fortsätter vi och
     // låter skalet i databasen avgöra.
-    if ((await isUsernameAvailable(username)) === false) {
+    //
+    // Registreringen frågar inte längre efter ett namn (det väljs i
+    // introduktionens namnsteg, som ställer samma fråga), så utan namn
+    // hoppas kontrollen över och triggern tar e-postens början.
+    if (username && (await isUsernameAvailable(username)) === false) {
       return { error: USERNAME_TAKEN_MESSAGE };
     }
 
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { username } },
+      options: username ? { data: { username } } : undefined,
     });
     if (error) {
       const msg = error.message.toLowerCase();

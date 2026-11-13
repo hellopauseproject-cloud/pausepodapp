@@ -22,7 +22,6 @@ export default function SignUpScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const { signUp } = useAuth();
-  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -46,11 +45,6 @@ export default function SignUpScreen() {
   };
 
   const handleSignUp = async () => {
-    if (!username.trim()) {
-      setError('Choose a username.');
-      shake();
-      return;
-    }
     if (!email.trim()) {
       setError('Enter your email address.');
       shake();
@@ -68,7 +62,9 @@ export default function SignUpScreen() {
     }
     setLoading(true);
     setError('');
-    const { error: err } = await signUp(email.trim(), password, username.trim());
+    // Inget namn här: det väljs i introduktionen, med fotot. Tills dess bär
+    // profilen triggerns reserv (e-postens början, se supabase/usernames.sql).
+    const { error: err } = await signUp(email.trim(), password);
     setLoading(false);
     if (err) {
       setError(err.includes('already registered') ? 'This email address is already registered.' : err);
@@ -124,17 +120,6 @@ export default function SignUpScreen() {
         </View>
 
         <Animated.View style={[styles.form, { transform: [{ translateX: shakeAnim }] }]}>
-          <TextInput
-            style={styles.input}
-            placeholder="Username"
-            placeholderTextColor={Palette.ink20}
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="next"
-            onSubmitEditing={() => emailInputRef.current?.focus()}
-          />
           <TextInput
             ref={emailInputRef}
             style={styles.input}

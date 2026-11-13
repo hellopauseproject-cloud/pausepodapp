@@ -42,3 +42,38 @@ export async function uploadSupportMedia(
 
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`;
 }
+
+/** Hur länge en signerad länk gäller. Skärmarna hämtar nya vid varje fokus. */
+const SIGNED_URL_TTL_S = 6 * 60 * 60;
+const PUBLIC_PREFIX = `/storage/v1/object/public/${BUCKET}/`;
+
+/**
+ * Byter `content_url` mot signerade länkar. Raderna bär fortfarande den
+ * publika URL:en som `uploadSupportMedia` returnerar, men bucketen ska vara
+ * privat (supabase/security_hardening.sql): bara avsändaren och mottagaren får
+ * läsa filen, och det avgörs av storage-policyn när länken signeras.
+ *
+ * Faller signeringen används den gamla URL:en — samma beteende som förut så
+ * länge bucketen är publik, och aldrig ett fel som fäller skärmen.
+ */
+export async function signSupportMediaUrls(urls: (string | null)[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const paths = new Map<string, string>();
+  for (const url of urls) {
+    if (!url) continue;
+    out.set(url, url);
+    const at = url.indexOf(PUBLIC_PREFIX);
+    if (at >= 0) paths.set(decodeURIComponent(url.slice(at + PUBLIC_PREFIX.length)), url);
+  }
+  if (paths.size === 0) return out;
+  try {
+    const { data } = await supabase.storage.from(BUCKET).createSignedUrls([...paths.keys()], SIGNED_URL_TTL_S);
+    for (const row of data ?? []) {
+      const original = row.path ? paths.get(row.path) : undefined;
+      if (original && row.signedUrl && !row.error) out.set(original, row.signedUrl);
+    }
+  } catch {
+    // Den publika URL:en står kvar.
+  }
+  return out;
+}

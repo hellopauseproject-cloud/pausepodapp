@@ -538,12 +538,10 @@ stödsvar och pausinbjudningar knackar numera — se *De sociala notiserna*.
   som förval per tabell — utan pollningen gick statusen bara att framkalla med
   en dragning nedåt, eftersom `fetchAll()` bara körs vid montering och flikar
   inte avmonteras när man byter flik. **`profiles` ligger medvetet inte i
-  publikationen:** RLS är av på tabellen, så realtime skulle skicka hela raden
-  till varje inloggad klient vid varje uppdatering. Fem sekunder är inte värt
-  det. Ska den in måste RLS på först. (Argumentet pekade förr på `push_token`
-  som det värsta i raden. Kolumnen är nullad nu, men raden bär fortfarande
-  allt annat på profilen, och en tabell utan RLS i en realtime-publikation är
-  fel oavsett vilken kolumn man råkar bry sig om.)
+  publikationen:** RLS är på numera, men en policy släpper igenom varje rad
+  till varje inloggad (kretsar, chatten och inbjudningarna läser namn och
+  ansikte på icke-vänner), så realtime hade ändå skickat varje profiländring
+  till alla. Fem sekunder är inte värt det. Se *Säkerhetshärdningen* nedan.
 - **Statusraden under en vän visar bara veckans aktivitet** — *pausing now*,
   minuter, timmar, *paused yesterday*, *paused 6 days ago*, sedan ingenting
   (`STATUS_MAX_HOURS` = en vecka i `friendStatusText`). Återkopplingen var
@@ -557,7 +555,14 @@ stödsvar och pausinbjudningar knackar numera — se *De sociala notiserna*.
 fil under [components/intro/](components/intro/). Den ersatte de gamla
 `onboarding-flow.tsx` och `onboarding-complete.tsx`, som är raderade.
 
-**Den är tre skärmar: hälsning, namn, och det sociala.** Den var åtta, sedan
+**Den är fyra skärmar: hälsning, namn, intentionerna, och det sociala.**
+Intentionerna ([step-intentions.tsx](components/intro/step-intentions.tsx),
+november 2026, på begäran) är profilens `IntentionSettings` i `bare`-läge,
+med egna intentioner (emoji + namn); inget är förvalt, Next kräver minst en
+vald, och varje tryck sparas direkt. **Namnet väljs här och inte vid registreringen**
+(som bara frågar e-post och lösenord): namnsteget kräver ett namn och frågar
+`username_available` före Next, med det egna nuvarande namnet som ledigt.
+Tills dess bär profilen triggerns reserv (e-postens början). Den var åtta, sedan
 fyra steg plus ett kvitto (hälsning, namn, lådan, dagsmål, kvitto). Lådsteget,
 dagsmålet och kvittot togs bort på begäran: målet sätts på Hem (*Set a daily
 goal*), och lådan är nedtonad (`POD_COMING_SOON`). I stället kom
@@ -911,7 +916,7 @@ lådan skickas snart, och den som inte har en ska vilja ha en.
   lägger sig platt igen efteråt), kameran läser koden och
   öppnar `/pair` (*Tag found.*, *It's yours.*) → telefonen
   tillbaka, och lådan säger **HI, <NAMN>** → locket på, och den första
-  pausen startar (bocken, **CLOCK ON.**, nedräkningen, märket) som i ritualen.
+  pausen startar (bocken, nedräkningen, märket) som i ritualen. **CLOCK ON.** visas inte på sidan, och **DONE** står i grönt (november 2026, på begäran).
 - **Lådan är ritad, inte fotograferad** — geometrin i
   [lib/podBoxArt.ts](lib/podBoxArt.ts) (ren data i snedprojektion, efter
   fotona: ljus ek med ådring, rundade kanter, skårorna på gaveln, en tunn, platt mörkgrå ram runt displayen;
@@ -1145,6 +1150,29 @@ Status i appen: alla fyra är implementerade. Se
   ingenting. Siffra + mening överst, detaljer (kategori, partnerstatus,
   hjärtat) därunder.
 
+### Säkerhetshärdningen
+
+[supabase/security_hardening.sql](supabase/security_hardening.sql) (november
+2026, före lansering) täpper tre hål utan att ändra vad appen gör:
+
+- **Ingen kan godkänna sin egen vänförfrågan.** Bara mottagaren får
+  uppdatera, bara till `accepted`, och bara kolumnen `status`. En insert
+  måste vara `pending`. Förr kunde avsändaren sätta `accepted` själv och då
+  läsa mottagarens pauser.
+- **`profiles` har kolumnbehörigheter.** Raderna är läsbara för alla
+  inloggade, men `push_token` (push till vem som helst via Expo) och de
+  olästa kolumnerna går inte att välja. **En ny kolumn måste läggas till i
+  `grant select (...)` i filen**, och `select('*')` mot profiles fungerar
+  inte. `tz_offset_minutes` och `daily_target_seconds` står med för att RPC:er
+  som körs som anroparen läser dem.
+- **Stödsvarens media läses bara av avsändaren och mottagaren** — policyn
+  går genom `support_responses` med dess RLS, alltså också förseglingen.
+  Klienten hämtar signerade länkar (`signSupportMediaUrls` i
+  lib/supportMedia.ts) och faller tillbaka på den publika URL:en.
+  [supabase/security_private_media.sql](supabase/security_private_media.sql)
+  gör bucketen privat och körs **först när alla har en app med
+  signeringen** — en äldre app spelar annars inte upp någonting.
+
 ### Användarnamn är unika, skiftlägesokänsligt
 
 `profiles.username` bär ett unikt index på `lower(username)`
@@ -1165,8 +1193,10 @@ att göra begriplig i efterhand. Därför ger den ett upptaget namn en siffra
 innan den når dit, och alla tre använder
 [lib/username.ts](lib/username.ts) så att formuleringen är en och samma:
 
-- [contexts/AuthContext.tsx](contexts/AuthContext.tsx)s `signUp` frågar
-  `username_available` **innan** kontot skapas. `null` från den frågan betyder
+- Introduktionens namnsteg ([components/intro/step-profile.tsx](components/intro/step-profile.tsx))
+  frågar `username_available` före Next. Registreringen frågar inte längre
+  efter ett namn; [contexts/AuthContext.tsx](contexts/AuthContext.tsx)s
+  `signUp` kontrollerar bara om den får ett. `null` från den frågan betyder
   "vet inte" (nätet), inte "upptaget" — då fortsätter registreringen och
   skalet i databasen får avgöra.
 - [app/intro.tsx](app/intro.tsx)s `finish()` känner igen `23505` och ber

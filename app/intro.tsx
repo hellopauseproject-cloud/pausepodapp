@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Dimensions, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StepIntentions } from '../components/intro/step-intentions';
 import { StepProfile } from '../components/intro/step-profile';
 import { StepSocial } from '../components/intro/step-social';
 import { StepWelcome } from '../components/intro/step-welcome';
@@ -24,7 +25,7 @@ const { width } = Dimensions.get('window');
  * och kan inte läsas härifrån, men `goTo` behöver en övre gräns innan den
  * finns — ett hopp utanför listan hade tömt scenen utan felmeddelande.
  */
-const TOTAL_STEPS = 3;
+const TOTAL_STEPS = 4;
 
 /**
  * Stegens namn i händelseloggen, i samma ordning som `steps`-arrayen längre
@@ -32,7 +33,7 @@ const TOTAL_STEPS = 3;
  * versioner — `analytics.intro_funnel` grupperar på den här strängen, och
  * flyttar man ett steg ska raden följa med sitt namn och inte sitt nummer.
  */
-const STEP_NAMES = ['welcome', 'profile', 'social'] as const;
+const STEP_NAMES = ['welcome', 'profile', 'intentions', 'social'] as const;
 
 /**
  * Introduktionen — skalet runt stegen.
@@ -61,10 +62,9 @@ const STEP_NAMES = ['welcome', 'profile', 'social'] as const;
  *   (Settings) äger väljaren, valet sparas per enhet och gäller redan innan
  *   någon loggat in. Introduktionen bad alltså om ett val som inte var dess.
  * - **Aktiviteter** frågades innan användaren sett vad en paus är i den här
- *   appen. [app/pause.tsx](./pause.tsx) ställer samma fråga i det ögonblick
- *   den betyder något, med hela listan framme — se standardgrenen i
- *   `getSelectedCategories()`, som är vad som gör den raden befolkad utan ett
- *   steg här. Settings äger redigeringen, inklusive egna aktiviteter.
+ *   appen. De är tillbaka på begäran, efter namnet
+ *   ([step-intentions.tsx](../components/intro/step-intentions.tsx)), utan
+ *   förval och med minst en vald för Next — samma komponent som i profilen.
  * - **Stödförfrågningar** visade ett story-kort för någon som ännu inte har
  *   en enda vän att fråga. Fliken Friends har en synlig plusknapp för samma
  *   sak, och den dyker upp när det finns någon att skicka till.
@@ -306,6 +306,7 @@ function IntroScreen() {
       onNext={next}
       onBack={back}
     />,
+    <StepIntentions key="intentions" onNext={next} onBack={back} />,
     <StepSocial key="social" saving={saving} error={error} onFinish={finish} onBack={back} />,
   ];
 

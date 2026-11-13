@@ -1,5 +1,5 @@
 import { Entypo, FontAwesome5 } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import {
@@ -25,16 +25,32 @@ import { lastEmoji } from '../lib/emojiInput';
  * och raden i `user_intentions` i takt.
  */
 
-export function IntentionSettings() {
+/**
+ * `bare` tar bort kortet och rubriken: introduktionen
+ * ([step-intentions.tsx](./intro/step-intentions.tsx)) ställer samma fråga som
+ * sin egen rubrik, och ett kort i ett steg vore en ram i en ram.
+ * `onSelectedChange` låter steget spärra Next tills minst en är vald.
+ */
+export function IntentionSettings({
+  bare, onSelectedChange,
+}: { bare?: boolean; onSelectedChange?: (ids: string[]) => void } = {}) {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const [selected, setSelected] = useState<string[]>([]);
+  // Ur en ref, så att en ny pil från föräldern inte kör effekten i onödan.
+  const onSelectedChangeRef = useRef(onSelectedChange);
+  onSelectedChangeRef.current = onSelectedChange;
+  useEffect(() => {
+    onSelectedChangeRef.current?.(selected);
+  }, [selected]);
   const [custom, setCustom] = useState<Category[]>([]);
   const [newEmoji, setNewEmoji] = useState('');
   const [newLabel, setNewLabel] = useState('');
 
   useEffect(() => {
     (async () => {
+      // Inget sparat → inget ikryssat, med flit (på begäran): i
+      // introduktionen ska man välja själv, och steget kräver minst en.
       const ids = await getSelectedCategoryIds();
       if (ids) setSelected(ids);
       setCustom(await getCustomCategories());
@@ -78,9 +94,13 @@ export function IntentionSettings() {
   };
 
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>What do you do during your pause?</Text>
-      <Text style={styles.sectionSubtitle}>Choose the activities that suit you.</Text>
+    <View style={bare ? styles.bare : styles.section}>
+      {!bare && (
+        <>
+          <Text style={styles.sectionTitle}>What do you do during your pause?</Text>
+          <Text style={styles.sectionSubtitle}>Choose the activities that suit you.</Text>
+        </>
+      )}
       <View style={styles.categoryGrid}>
         {all.map(cat => {
           const on = selected.includes(cat.id);
@@ -154,6 +174,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     padding: Spacing.lg,
     marginBottom: Spacing.xl,
   },
+  bare: { width: '100%' },
   sectionTitle: { fontSize: 20, fontWeight: 'bold', color: Palette.textPrimary, marginBottom: 6 },
   sectionSubtitle: { fontSize: 14, color: Palette.textSecondary, marginBottom: 16, lineHeight: 22 },
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },

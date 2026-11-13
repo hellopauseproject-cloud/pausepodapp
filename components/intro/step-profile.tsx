@@ -7,6 +7,9 @@ import {
 } from 'react-native';
 import { saveProfile } from '../../app/userProfile';
 import { Radius } from '../../constants/appTheme';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
+import { isUsernameAvailable, USERNAME_TAKEN_MESSAGE } from '../../lib/username';
 import { IntroStep, useIntroStyles } from './intro-chrome';
 
 /**
@@ -26,7 +29,10 @@ export function StepProfile({
   onBack: () => void;
 }) {
   const { Palette, styles } = useIntroStyles();
+  const { user } = useAuth();
   const [picking, setPicking] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const pickPhoto = async () => {
     if (picking) return;
@@ -59,9 +65,36 @@ export function StepProfile({
     }
   };
 
+  /**
+   * Registreringen frågar inte längre efter ett namn, så det här är stället
+   * där det väljs — och därför också stället där ett upptaget namn fångas.
+   * Förr kom felet först i sista steget, två skärmar bort.
+   *
+   * Det egna nuvarande namnet räknas som ledigt: den som kör om
+   * introduktionen har redan ett, och `username_available` hade svarat att
+   * det är taget (av en själv). `null` (nätet) släpper förbi, och `finish()`
+   * fångar krocken som förut.
+   */
   const handleNext = async () => {
-    await saveProfile(name.trim() || 'Yourself', photo);
-    onNext();
+    const trimmed = name.trim();
+    if (!trimmed || checking) return;
+    setNameError(null);
+    setChecking(true);
+    try {
+      let own: string | null = null;
+      if (user?.id) {
+        const { data } = await supabase.from('profiles').select('username').eq('id', user.id).maybeSingle();
+        own = data?.username ?? null;
+      }
+      if (own?.toLowerCase() !== trimmed.toLowerCase() && (await isUsernameAvailable(trimmed)) === false) {
+        setNameError(USERNAME_TAKEN_MESSAGE);
+        return;
+      }
+      await saveProfile(trimmed, photo);
+      onNext();
+    } finally {
+      setChecking(false);
+    }
   };
 
   return (
@@ -69,8 +102,9 @@ export function StepProfile({
       <IntroStep
         title={"Let's start with\nthe essentials"}
         subtitle=""
-        primaryLabel="Next →"
+        primaryLabel={checking ? 'Checking…' : 'Next →'}
         onPrimary={handleNext}
+        primaryDisabled={!name.trim() || checking}
         onBack={onBack}
       >
         <TouchableOpacity onPress={pickPhoto} activeOpacity={0.8}>
@@ -98,13 +132,17 @@ export function StepProfile({
           placeholder="Username"
           placeholderTextColor={Palette.textTertiary}
           value={name}
-          onChangeText={setName}
+          onChangeText={v => { setName(v); setNameError(null); }}
           autoCapitalize="words"
           returnKeyType="done"
           onSubmitEditing={Keyboard.dismiss}
           blurOnSubmit
         />
-        <Text style={styles.hint}>Both can be changed later.</Text>
+        {nameError ? (
+          <Text style={[styles.hint, { color: Palette.danger }]}>{nameError}</Text>
+        ) : (
+          <Text style={styles.hint}>Both can be changed later.</Text>
+        )}
       </IntroStep>
     </KeyboardAvoidingView>
   );

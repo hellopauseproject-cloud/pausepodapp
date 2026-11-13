@@ -95,7 +95,6 @@ const USE: Step[] = [
     frames: [
       { ms: 1800, set: { lid: 0 } },
       { ms: 1400, set: { screen: 'check' } },
-      { ms: 1400, set: { screen: 'clockOn' } },
       { ms: 3200, set: { screen: 'count' } },
       { ms: 2600, set: { screen: 'active' } },
     ],
@@ -177,7 +176,6 @@ const SETUP: Step[] = [
       { ms: 3400, set: { screen: 'paired' } },
       { ms: 1800, set: { lid: 0 } },
       { ms: 1400, set: { screen: 'check' } },
-      { ms: 1400, set: { screen: 'clockOn' } },
       { ms: 3200, set: { screen: 'count' } },
       { ms: 2600, set: { screen: 'active' } },
     ],
