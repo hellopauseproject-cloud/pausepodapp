@@ -1174,6 +1174,9 @@ declare
   v_ended_at timestamptz;
   v_counted int;
   v_rows int;
+  v_local_start timestamp;
+  v_local_end timestamp;
+  v_times jsonb := '{}'::jsonb;
 begin
 
   -- `kind = 'pause'`: en natt (supabase/sleep.sql) kommer aldrig in i
@@ -1186,6 +1189,19 @@ begin
 
   if v_seconds is null or v_ended_at is null then
     return;
+  end if;
+
+  -- En paus som rörde natten (00–05 i medlemmens egen tid, förbi midnatt
+  -- eller startad efter den) får sina tider i flödet: *took a 7h pause ·
+  -- 23:10 – 07:00*. Den som svarat *No* på *Were you asleep?* står då med
+  -- tiderna framför kretsen (app/pausing.tsx). Klienten visar dem i
+  -- läsarens tid, som veckans längsta paus.
+  v_local_start := (v_started_at at time zone 'UTC') - make_interval(mins => coalesce(p_tz_offset_minutes, 0));
+  v_local_end := (v_ended_at at time zone 'UTC') - make_interval(mins => coalesce(p_tz_offset_minutes, 0));
+  if v_local_end::date > v_local_start::date
+     or extract(hour from v_local_start) < 5
+     or extract(hour from v_local_end) < 5 then
+    v_times := jsonb_build_object('started_at', v_started_at, 'ended_at', v_ended_at);
   end if;
 
   for v_circle_id in select circle_id from circle_members where user_id = auth.uid() loop
@@ -1208,7 +1224,7 @@ begin
       insert into circle_activity (circle_id, actor_id, type, metadata)
         values (v_circle_id, auth.uid(), 'pause_completed',
                 jsonb_build_object('duration_seconds', v_counted, 'category', p_category,
-                                   'session_id', p_session_id));
+                                   'session_id', p_session_id) || v_times);
 
       perform evaluate_circle_goals(v_circle_id);
     end if;

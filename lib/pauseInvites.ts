@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import { track } from './analytics';
+import { isPausingNow } from './pausingFlag';
 import { supabase } from './supabase';
 
 /**
@@ -104,8 +105,8 @@ export async function fetchInvitableFriends(userId: string): Promise<InvitableFr
     .from('friendships')
     .select(`
       requester_id,
-      requester:profiles!requester_id(id, username, avatar_url, is_pausing),
-      receiver:profiles!receiver_id(id, username, avatar_url, is_pausing)
+      requester:profiles!requester_id(id, username, avatar_url, is_pausing, pausing_until),
+      receiver:profiles!receiver_id(id, username, avatar_url, is_pausing, pausing_until)
     `)
     .or(`requester_id.eq.${userId},receiver_id.eq.${userId}`)
     .eq('status', 'accepted');
@@ -118,7 +119,7 @@ export async function fetchInvitableFriends(userId: string): Promise<InvitableFr
       id: p.id,
       username: p.username ?? '?',
       avatar_url: p.avatar_url?.startsWith('https://') ? p.avatar_url : null,
-      is_pausing: !!p.is_pausing,
+      is_pausing: isPausingNow(p),
     }))
     .sort((a, b) => a.username.localeCompare(b.username));
 }

@@ -351,7 +351,7 @@ function InnerLayout() {
     // En natt är ingen paus: ingen sammanfattning, inget pause_completed i
     // tratten (lib/sleep.ts loggar sitt eget). Den slutar på Hem i dagläge —
     // det är morgon, och natten själv står i statistiken.
-    if (sessionState.pauseType === 'sleep') {
+    if (sessionState.pauseType === 'sleep' || lastEnded.night) {
       sessionDispatch({ type: 'RESET' });
       markNightEnded();
       router.replace('/(tabs)' as never);

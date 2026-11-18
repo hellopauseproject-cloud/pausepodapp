@@ -36,7 +36,7 @@ import {
 import { applyPendingDailyGoal, isIntroDeferred } from '../../lib/introPrefs';
 import { HOLD_TO_START_MS, SHOW_PAUSE_SETUP_VIEW, startPhonePause } from '../../lib/pauseFlow';
 import { PendingPauseTag, takePendingPauseTag } from '../../lib/pauseTags';
-import { chooseHomeMode, HomeMode, isNightHours, refreshHomeMode, useHomeMode } from '../../lib/homeMode';
+import { chooseHomeMode, HomeMode, refreshHomeMode, useHomeMode } from '../../lib/homeMode';
 import { startSleep } from '../../lib/sleep';
 import { NightMoon } from '../../components/night-moon';
 import { SegmentedPill } from '../../components/segmented-pill';
@@ -341,10 +341,9 @@ function HomeScreen() {
   // Läget följer klockan vid varje fokus, om inget eget val är färskt.
   const homeMode = useHomeMode();
   const isNight = homeMode === 'night';
-  // Mellan midnatt och fem går det inte att välja dagen (lib/homeMode.ts).
   // Läget prövas också en gång i minuten medan Hem har fokus, så att en
-  // skärm som står öppen över midnatt byter av sig själv.
-  const nightLocked = isNightHours();
+  // skärm som står öppen över midnatt byter till natt av sig själv. Dagen går
+  // att välja även då (lib/homeMode.ts).
   useFocusEffect(useCallback(() => {
     refreshHomeMode();
     const id = setInterval(refreshHomeMode, 60_000);
@@ -745,15 +744,12 @@ function HomeScreen() {
         }}>
           {/* Dag eller natt. Ett val och inte en etikett — samma kapsel som
               Kretsens *This week / Today*. */}
-          {/* Efter midnatt finns inget val (lib/homeMode.ts `isNightHours`):
-              kapseln står kvar men har bara natten, så att sidan inte hoppar. */}
           <View style={styles.modePill}>
             <SegmentedPill
               options={MODE_OPTIONS}
               value={homeMode}
               onChange={chooseHomeMode}
               width={MODE_PILL_W}
-              disabled={nightLocked ? ['day'] : undefined}
             />
           </View>
           {userName ? (

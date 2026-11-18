@@ -520,6 +520,18 @@ stödsvar och pausinbjudningar knackar numera — se *De sociala notiserna*.
   inväntade varandra, och två HTTP-anrop har ingen inbördes ordning — ett
   `false` kunde landa efter det `true` det skulle föregått. En fjärde lös
   `.update({ is_pausing })` någonstans återinför det.
+  - **Flaggan har ett utgångsdatum** (`profiles.pausing_until`,
+    [supabase/pausing_flag.sql](supabase/pausing_flag.sql), november 2026,
+    körs **före appen**). Skrivningen går genom RPC:n `set_pausing_state`
+    med tre lägen, och servern sätter tiden: klockan går → till nästa lokala
+    midnatt (en paus kan vara hur lång som helst, och vid midnatt blir den
+    ändå en natt), klockan fryst → tio minuter
+    (`BACKGROUND_RESTART_MAX_FROZEN_MS`), slut → `false`. Pausskärmen skriver
+    läget vid varje fasbyte, bredvid Global Pause-rapporten. Dör appen släcks
+    flaggan av sig själv i stället för att stå kvar tills appen öppnas.
+    *Pausing now* läses **bara** genom `isPausingNow()` — en läsare som tar
+    `is_pausing` rakt av visar den döda appens paus igen. En äldre app som
+    skriver `is_pausing` direkt får 24 timmar av en trigger.
   - Pausskärmens montering sätter `true`, dess cleanup `false`. Tvångsstängs
     appen körs cleanup:en aldrig, så [app/_layout.tsx](app/_layout.tsx) nollar
     flaggan **en gång per appstart, villkorslöst**: vid start pausar man inte.
@@ -1146,6 +1158,13 @@ Status i appen: alla fyra är implementerade. Se
   global `phase === 'ended'` → reset + navigering till `/pausesummary`
   (oavsett monterad skärm), global tillståndsbaserad lyft-detektering
   (`phone_up`) medan en box-session pågår.
+  **En dagpaus som dog sparas till sista pulsen, och ingen frågar** (november
+  2026). En fråga om när telefonen lyftes byggdes och togs bort på begäran:
+  utan spärr gick den att fuska med (svep bort appen, välj en sen tid), och
+  spärren — batterinivån vid pulsen, `expo-battery` — var för omständlig
+  för ett ovanligt fall. Priset är att en paus där batteriet tog slut sparas
+  för kort. Det synliga problemet, en vän som stod som pausande, löses av
+  flaggans utgångsdatum i stället.
 - [app/pausesummary.tsx](app/pausesummary.tsx) — tar emot, beslutar
   ingenting. Siffra + mening överst, detaljer (kategori, partnerstatus,
   hjärtat) därunder.
@@ -2293,36 +2312,38 @@ Schemat bor i [supabase/sleep.sql](supabase/sleep.sql), klientsidan i
 - **En natt hör till kvällen den började**, med gränsen vid lokal middag
   (`sleep_night_of()`). En sömn som börjar 01:00 tisdag är alltså
   måndagsnatten.
-- **Efter midnatt finns ingen dagpaus** (`isNightHours()` i
-  [lib/homeMode.ts](lib/homeMode.ts), 00:00–05:00, samma femgräns som Hems
-  nattläge). Tre regler, beslutade i oktober 2026 som förutsättning för allt
-  som någon gång rankar pauser — annars mäter en topplista sömn:
-  - **SLEEP går att välja när som helst**, också före midnatt, och är då en
-    natt hela vägen. Oförändrat.
-  - **Mellan 00 och 05 startar varje väg in i en paus en natt i stället:**
-    Hem låses i nattläge (kapselns *Day* är nedtonad, och läget prövas varje
-    minut medan Hem har fokus), `startPhonePause`/`openPauseStart` startar
-    en natt, och *Join* på en pausinbjudan i Friends startar en natt utan att
-    besvara inbjudan — natten är privat. Händelsen `sleep_started` bär
-    `via: 'night_hours'` för dessa.
-  - **En dagpaus som går vid midnatt blir en natt där**
-    ([app/pausing.tsx](app/pausing.tsx), `midnightAtRef`). Tiden före
-    midnatt sparas som en paus med sluttid 23:59:59 (`dayEndMs`, så att den
-    hamnar på rätt dag — dagen räknas på `ended_at`); tiden efter blir en
-    sömnrad från midnatt (eller läggningen efter den) **till första lyftet**.
-    Inga uppvaknanden och ingen tjugominutersfrist: lyftet *är* slutet. Står
-    klockan frusen vid midnatt (telefonen uppe sedan före) blir det ingen
-    natt, pausen slutar som den stod. Skärmen säger *Sleeping...* och
-    "pausing now" släcks vid omvandlingen.
-  - Det upptäcks när JS kör, alltså vid nästa tick eller när appen kommer
-    fram. Hann lyftet registreras före kollen (JS sov genom natten) räknas
-    natten fram till lyftet ändå — utan den grenen hade hela natten sparats
-    som dag.
-  - **Krasch-återställningen gör samma delning** (`nightStartAt`/`dayMs` i
-    checkpointen), och en paus som passerat midnatt utan att hinna bli en
-    natt kapas vid midnatt.
+- **En paus som rörde natten frågar *Were you asleep?*** (november 2026, på
+  begäran; ersatte reglerna från oktober nedan). Natten är 00:00–05:00 i
+  telefonens tid (`isNightHours()`, `nightOverlap()` i [lib/homeMode.ts](lib/homeMode.ts)).
+  - **SLEEP går att välja när som helst** och är då en natt hela vägen.
+    Oförändrat.
+  - **En paus går att starta efter midnatt, och fortsätter förbi den.** Hem
+    står i nattläge som förval mellan 00 och 05, men *Day* går att välja. Ett
+    eget dagval från kvällen står sig inte över midnatt (`refreshHomeMode`).
+    *Join* på en pausinbjudan startar en vanlig paus också på natten.
+  - **Frågan ställs när pausen slutar, före allt sparande** (`finishPause` i
+    [app/pausing.tsx](app/pausing.tsx)), om minst 30 minuter
+    (`ASK_ASLEEP_MIN_MS`) av pausen låg i natten. Före, för att kretsens
+    dagsmålsnotis annars hinner gå ut för en natts sömn. *Yes*: tiden före
+    natten blir en paus som slutar en sekund före midnatt (dagen räknas på
+    `ended_at`), och resten en sömnrad från midnatt — eller från starten,
+    om pausen började efter midnatt — till lyftet, utan uppvaknanden. Blir
+    pausdelen under fem sekunder är det en natt hela vägen
+    (`SESSION_ENDED.night`) och den slutar på Hem som en natt. *No*: en
+    paus hela vägen. Händelsen är `pause_asleep_answered`.
+  - **Det bygger på ärlighet, och kretsen ser tiderna.** En paus som rörde
+    natten i medlemmens tid får `started_at`/`ended_at` i flödets metadata
+    (`record_circle_pause`), och flödet säger *took a 7h pause · 23:10 –
+    07:00* i läsarens tid. Kör om circles.sql.
+  - **"Pausing now" visas inte mellan 00 och 05** (app/pausing.tsx skriver
+    `off` då, och servern släcker flaggan vid midnatt).
+  - **Dör appen frågar ingen:** krasch-återställningen kapar pausen vid
+    midnatt som förut (och delar en gammal checkpoint med `nightStartAt`).
   - Taggningen efter pausen (`findOnce` i lib/pauseTags.ts) letar tillbaka
     till strax före senaste midnatt, för dagdelen taggas först på morgonen.
+  - Förr (oktober 2026) startade varje väg in i en paus en natt mellan 00 och
+    05, Hem låstes i nattläge, och en dagpaus blev en natt automatiskt vid
+    midnatt. Det föll för att det inte gick att pausa efter midnatt.
   - Lådans session och regulate berörs inte.
 - **Det finns inget nattmål, och det ska inte komma tillbaka utan ett nytt
   skäl.** Ett fanns en kort tid (`profiles.nightly_target_seconds`,

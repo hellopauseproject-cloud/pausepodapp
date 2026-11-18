@@ -26,25 +26,53 @@ const autoMode = (): HomeMode => {
 };
 
 /**
- * **Mellan midnatt och `NIGHT_UNTIL_HOUR` (05) är det natt, utan val.** Före
- * midnatt får man välja natt tidigt; efter midnatt går det inte att välja en
- * dagpaus. Hem låses i nattläge, och varje väg in i en paus startar en natt i
- * stället (`startPhonePause` i lib/pauseFlow.ts, *Join* i Friends). En
- * dagpaus som fortfarande går vid midnatt blir en natt där — se
- * `nextMidnight` och app/pausing.tsx.
+ * **Mellan midnatt och `NIGHT_UNTIL_HOUR` (05) är det natt.** Hem står då i
+ * nattläge som förval, men dagen går att välja och en paus går att starta
+ * (november 2026, på begäran — förr låstes Hem och varje paus blev en natt).
+ * En paus som legat i det här fönstret frågar i stället *Were you asleep?*
+ * när den slutar (`nightOverlap`, app/pausing.tsx), och "pausing now" visas
+ * inte under det (lib/pausingFlag.ts).
  *
- * Skälet är att en paus över natten annars fyllde morgonens dagsring, och
- * att allt som någon gång rankar pauser hade mätt sömn.
+ * Skälet till frågan är detsamma som till låset: en paus över natten fyllde
+ * annars morgonens dagsring, och allt som någon gång rankar pauser hade mätt
+ * sömn. Kretsens flöde visar dessutom tiderna för en sådan paus.
  */
 export function isNightHours(at: Date = new Date()): boolean {
   return at.getHours() < NIGHT_UNTIL_HOUR;
 }
 
-/** Nästa lokala midnatt efter `fromMs` — där en dagpaus blir en natt. */
+/** Nästa lokala midnatt efter `fromMs`. */
 export function nextMidnight(fromMs: number): number {
   const d = new Date(fromMs);
   d.setHours(24, 0, 0, 0);
   return d.getTime();
+}
+
+/** Så mycket av en paus som måste ha legat i natten för att frågan ska ställas. */
+export const ASK_ASLEEP_MIN_MS = 30 * 60_000;
+
+/**
+ * Hur mycket av `[startMs, endMs]` som låg mellan 00 och 05 i telefonens
+ * tid, och var det första sådana fönstret började — där natten börjar om
+ * svaret är *Yes*. `null` när inget av det låg i natten.
+ */
+export function nightOverlap(startMs: number, endMs: number): { ms: number; firstStartMs: number } | null {
+  const day = new Date(startMs);
+  day.setHours(0, 0, 0, 0);
+  let ms = 0;
+  let firstStartMs: number | null = null;
+  while (day.getTime() < endMs) {
+    const from = day.getTime();
+    const until = new Date(day);
+    until.setHours(NIGHT_UNTIL_HOUR);
+    const overlap = Math.min(endMs, until.getTime()) - Math.max(startMs, from);
+    if (overlap > 0) {
+      ms += overlap;
+      if (firstStartMs === null) firstStartMs = from;
+    }
+    day.setDate(day.getDate() + 1);
+  }
+  return firstStartMs === null ? null : { ms, firstStartMs };
 }
 
 let mode: HomeMode = autoMode();
@@ -58,7 +86,6 @@ export function getHomeMode(): HomeMode {
 
 /** Ett val i kapseln — står sig i några timmar. */
 export function chooseHomeMode(next: HomeMode) {
-  if (next === 'day' && isNightHours()) return;
   chosenAt = Date.now();
   if (next === mode) return;
   mode = next;
@@ -67,8 +94,11 @@ export function chooseHomeMode(next: HomeMode) {
 
 /** Vid fokus på Hem: klockans läge, om inget eget val är färskt. */
 export function refreshHomeMode() {
-  // Efter midnatt gäller inget eget dagval — se `isNightHours`.
-  const next = isNightHours() ? 'night' : Date.now() - chosenAt < MANUAL_HOLD_MS ? mode : autoMode();
+  // Efter midnatt är natten förval igen: ett eget val från i går kväll står
+  // sig inte över midnatt, ett gjort efter den gör det.
+  const lastMidnight = nextMidnight(Date.now()) - 24 * 3600 * 1000;
+  const fresh = Date.now() - chosenAt < MANUAL_HOLD_MS && !(isNightHours() && chosenAt < lastMidnight);
+  const next = fresh ? mode : autoMode();
   if (next === mode) return;
   mode = next;
   emit();

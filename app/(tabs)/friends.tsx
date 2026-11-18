@@ -39,9 +39,8 @@ import { PausePodLogo } from '../../components/pause-pod-logo';
 import { CircleLevelBadge } from '../../components/circle-level-badge';import { circleLevelName } from '../../lib/circleLevels';
 import { FriendCircleBadge, getFriendCircleBadge, getMyCircles } from '../../lib/circles';
 import { track } from '../../lib/analytics';
-import { isNightHours } from '../../lib/homeMode';
 import { enablePushNotifications } from '../../lib/notifications';
-import { startSleep } from '../../lib/sleep';
+import { isPausingNow } from '../../lib/pausingFlag';
 import { supabase } from '../../lib/supabase';
 import {
   fetchSentSupport, liveStoryFilter, recentSupportQuery, storyTimeLeft, unopenedResponsesQuery,
@@ -1464,8 +1463,8 @@ function FriendsScreen() {
       .from('friendships')
       .select(`
         id, requester_id, receiver_id,
-        requester:profiles!requester_id(id, username, avatar_url, show_stats, is_pausing),
-        receiver:profiles!receiver_id(id, username, avatar_url, show_stats, is_pausing)
+        requester:profiles!requester_id(id, username, avatar_url, show_stats, is_pausing, pausing_until),
+        receiver:profiles!receiver_id(id, username, avatar_url, show_stats, is_pausing, pausing_until)
       `)
       .or(`requester_id.eq.${user.id},receiver_id.eq.${user.id}`)
       .eq('status', 'accepted');
@@ -1477,8 +1476,10 @@ function FriendsScreen() {
       })
       .map((f: any) => {
         const isRequester = f.requester_id === user.id;
-        const profile = isRequester ? f.receiver : f.requester;
-        return { ...profile, friendshipId: f.id };
+        const { pausing_until, ...profile } = isRequester ? f.receiver : f.requester;
+        // Flaggan har ett utgångsdatum (lib/pausingFlag.ts); en som gått ut
+        // är en paus vars app dog, inte en som pågår.
+        return { ...profile, is_pausing: isPausingNow({ ...profile, pausing_until }), friendshipId: f.id };
       });
 
     setFriends(friendList);
@@ -1590,9 +1591,6 @@ function FriendsScreen() {
   // värden kan ha slutat i sekunden mellan pollningen och trycket.
   const joinInvite = async (invite: IncomingPauseInvite) => {
     if (joiningInviteId) return;
-    // Efter midnatt blir det en natt i stället, och en natt är privat — den
-    // hänger inte på någons paus, så inbjudan besvaras inte (lib/homeMode.ts).
-    if (isNightHours()) { startSleep('push', 'night_hours'); return; }
     setJoiningInviteId(invite.id);
     try {
       const { sharedId, hostName } = await joinPauseInvite(invite.id);
@@ -1733,7 +1731,7 @@ function FriendsScreen() {
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, is_pausing')
+      .select('id, is_pausing, pausing_until')
       .in('id', ids);
 
     if (error) {
@@ -1741,7 +1739,7 @@ function FriendsScreen() {
       return;
     }
 
-    const live = new Map((data ?? []).map((r: any) => [r.id as string, !!r.is_pausing]));
+    const live = new Map((data ?? []).map((r: any) => [r.id as string, isPausingNow(r)]));
     setFriends(prev => {
       let changed = false;
       const next = prev.map(f => {

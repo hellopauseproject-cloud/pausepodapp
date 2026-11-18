@@ -134,6 +134,20 @@ export function formatWeekRange(weekStart: string, workdays = false): string {
  */
 export type ActivitySegment = { text: string; em?: boolean };
 
+/**
+ * ` · 23:10 – 07:00` för en paus som rörde natten, annars tomt. Tiderna
+ * står i metadatan bara då (`record_circle_pause`), och visas i läsarens
+ * tid som veckans längsta paus i wrapped.
+ */
+function nightTimes(meta: Record<string, any>): string {
+  if (!meta.started_at || !meta.ended_at) return '';
+  const hhmm = (iso: string) => {
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  return ` · ${hhmm(meta.started_at)} – ${hhmm(meta.ended_at)}`;
+}
+
 export function formatActivitySegments(item: CircleActivity, actorName: string): ActivitySegment[] {
   const meta = item.metadata ?? {};
   switch (item.type as CircleActivityType) {
@@ -145,9 +159,10 @@ export function formatActivitySegments(item: CircleActivity, actorName: string):
     case 'pause_completed': {
       const dur = formatDuration(meta.duration_seconds ?? 0);
       const verb = meta.category ? CATEGORY_VERB[meta.category] : null;
+      const times = nightTimes(meta);
       return verb
-        ? [{ text: `${actorName} took a ` }, { text: dur, em: true }, { text: ' pause to ' }, { text: verb, em: true }]
-        : [{ text: `${actorName} took a ` }, { text: dur, em: true }, { text: ' pause' }];
+        ? [{ text: `${actorName} took a ` }, { text: dur, em: true }, { text: ' pause to ' }, { text: verb, em: true }, ...(times ? [{ text: times }] : [])]
+        : [{ text: `${actorName} took a ` }, { text: dur, em: true }, { text: ` pause${times}` }];
     }
     case 'goal_set':
       return meta.raised
@@ -212,9 +227,10 @@ export function formatActivity(item: CircleActivity, actorName: string): string 
     case 'pause_completed': {
       const dur = formatDuration(meta.duration_seconds ?? 0);
       const verb = meta.category ? CATEGORY_VERB[meta.category] : null;
+      const times = nightTimes(meta);
       return verb
-        ? `${actorName} took a ${dur} pause to ${verb}!`
-        : `${actorName} took a ${dur} pause!`;
+        ? `${actorName} took a ${dur} pause to ${verb}${times}!`
+        : `${actorName} took a ${dur} pause${times}!`;
     }
     default:
       return `${actorName} did something in the circle.`;

@@ -21,6 +21,10 @@ export interface SessionEndedInfo {
   seq: string;
   durationMs: number;
   completed: boolean;
+  /** Den lådlösa pausen visade sig vara en natt hela vägen (*Were you
+   *  asleep?* i app/pausing.tsx): ingen sammanfattning, den slutar på Hem
+   *  som en natt. */
+  night?: boolean;
 }
 
 export interface SessionState {
@@ -83,7 +87,7 @@ export type SessionEvent =
       sharedSessionId?: string;
       sharedWithName?: string;
     }
-  | { type: 'SESSION_ENDED'; seq: string; durationMs: number; completed: boolean }
+  | { type: 'SESSION_ENDED'; seq: string; durationMs: number; completed: boolean; night?: boolean }
   /** Box skickar sitt aktuella tillstånd direkt efter anslutning — hoppar rakt in, förbi normala övergångar. */
   | { type: 'RESTORE'; phase: SessionPhase; elapsedMs: number; seq: string; withPod: boolean }
   | { type: 'RESET' };
@@ -195,7 +199,7 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
       return {
         ...state,
         phase: 'ended',
-        lastEnded: { seq: event.seq, durationMs: event.durationMs, completed: event.completed },
+        lastEnded: { seq: event.seq, durationMs: event.durationMs, completed: event.completed, night: event.night },
       };
 
     case 'RESTORE':

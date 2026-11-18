@@ -32,14 +32,28 @@ import { supabase } from './supabase';
  * skrivning som föll på RLS eller nät gjorde en paus osynlig utan ett spår att
  * följa.
  */
+/**
+ * **Flaggan har ett utgångsdatum** (supabase/pausing_flag.sql): medan klockan
+ * går till nästa lokala midnatt, medan den står fryst i tio minuter. Dör
+ * appen — batteriet, en tvångsstängning — släcks flaggan av sig själv i
+ * stället för att stå kvar tills appen öppnas igen. Tiden sätts av servern;
+ * appen säger bara vilket läge pausen är i.
+ */
+export type PausingState = 'running' | 'frozen' | 'off';
+
+/** "Pausing now" för en profilrad — läsarnas enda fråga om flaggan. */
+export function isPausingNow(row: { is_pausing?: boolean | null; pausing_until?: string | null }): boolean {
+  return !!row.is_pausing && !!row.pausing_until && Date.parse(row.pausing_until) > Date.now();
+}
+
 let chain: Promise<void> = Promise.resolve();
 
 /**
- * Det senast **bekräftade** värdet i databasen, eller `null` när vi inte vet.
- * Låter `clearStalePausingFlag` hoppa över skrivningen när flaggan redan
- * bevisligen är `false`, så att varje återkomst till appen inte blir ett anrop.
+ * Det senast **bekräftade** läget i databasen, eller `null` när vi inte vet.
+ * En skrivning av samma läge hoppas över — både nollningen vid varje
+ * återkomst och pausskärmens läge, som skrivs vid varje fasbyte.
  */
-let confirmed: boolean | null = null;
+let confirmed: PausingState | null = null;
 
 /**
  * Tre försök med en kort väntan emellan. Taket är inte en detalj: omförsöken
@@ -51,27 +65,32 @@ const RETRY_DELAY_MS = 2000;
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-export function setPausingFlag(userId: string, value: boolean): Promise<void> {
+/**
+ * `userId` behövs inte av RPC:n (den läser `auth.uid()`), men står kvar i
+ * signaturen: anroparna har det, och utan en inloggad användare finns inget
+ * att skriva.
+ */
+export function setPausingState(userId: string, state: PausingState): Promise<void> {
   const next = chain.then(async () => {
+    if (!userId || confirmed === state) return;
     confirmed = null;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
-        // Raderna räknas (`.select('id')`): RLS på `profiles` släpper bara
-        // igenom `auth.uid() = id`, och ett anrop som går ut innan token
-        // förnyats uppdaterar noll rader UTAN fel. Så kunde en nollning vid
-        // appstart "lyckas" och lämna en vän som pausande i ett dygn.
-        const { data, error } = await supabase
-          .from('profiles')
-          .update({ is_pausing: value })
-          .eq('id', userId)
-          .select('id');
-        if (!error && (data?.length ?? 0) > 0) {
-          confirmed = value;
+        // RPC:n svarar `false` när ingen rad uppdaterades: ett anrop som går
+        // ut innan token förnyats ger noll rader UTAN fel. Så kunde en
+        // nollning vid appstart "lyckas" och lämna en vän som pausande i ett
+        // dygn.
+        const { data, error } = await supabase.rpc('set_pausing_state', {
+          p_state: state,
+          p_tz_offset_minutes: new Date().getTimezoneOffset(),
+        });
+        if (!error && data === true) {
+          confirmed = state;
           return;
         }
-        console.log('[pausingFlag] set', value, 'attempt', attempt, 'failed:', error?.message ?? 'no rows updated');
+        console.log('[pausingFlag] set', state, 'attempt', attempt, 'failed:', error?.message ?? 'no rows updated');
       } catch (e: any) {
-        console.log('[pausingFlag] set', value, 'attempt', attempt, 'threw:', e?.message ?? e);
+        console.log('[pausingFlag] set', state, 'attempt', attempt, 'threw:', e?.message ?? e);
       }
       if (attempt < ATTEMPTS) await wait(RETRY_DELAY_MS);
     }
@@ -80,11 +99,15 @@ export function setPausingFlag(userId: string, value: boolean): Promise<void> {
   return next;
 }
 
+/** Paus börjar (`true`, klockan går) eller slutar (`false`). */
+export function setPausingFlag(userId: string, value: boolean): Promise<void> {
+  return setPausingState(userId, value ? 'running' : 'off');
+}
+
 /**
  * Nollningen när appen kommer fram, se `app/_layout.tsx`. Anroparen avgör att
- * ingen paus pågår; här avgörs bara om det behöver skrivas alls.
+ * ingen paus pågår; skrivs samma läge redan hoppas den över i kön.
  */
 export function clearStalePausingFlag(userId: string): Promise<void> {
-  if (confirmed === false) return chain;
-  return setPausingFlag(userId, false);
+  return setPausingState(userId, 'off');
 }

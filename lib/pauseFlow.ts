@@ -1,8 +1,6 @@
 import { router } from 'expo-router';
 
 import { track } from './analytics';
-import { isNightHours } from './homeMode';
-import { startSleep } from './sleep';
 
 /**
  * Vägen in i en paus — med eller utan valskärmen ([app/pause.tsx](../app/pause.tsx)).
@@ -40,8 +38,6 @@ export const HOLD_TO_START_MS = 700;
  * pausen, där man väljer den vid *I'll join*.
  */
 export function startPhonePause(how: 'push' | 'replace' = 'push', category = '') {
-  // Efter midnatt finns ingen dagpaus att starta — se `isNightHours`.
-  if (isNightHours()) { startSleep(how, 'night_hours'); return; }
   track('pause_mode_selected', {
     with_pod: false,
     category: category || null,
@@ -65,7 +61,7 @@ export function startPhonePause(how: 'push' | 'replace' = 'push', category = '')
  * *I'll take a pause* efter ett stödsvar — och därför inte behöver hållas in.
  */
 export function openPauseStart(how: 'push' | 'replace' = 'push') {
-  if (SHOW_PAUSE_SETUP_VIEW && !isNightHours()) {
+  if (SHOW_PAUSE_SETUP_VIEW) {
     if (how === 'replace') router.replace('/pause');
     else router.push('/pause');
     return;
