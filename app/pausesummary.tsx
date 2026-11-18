@@ -87,15 +87,12 @@ function PauseSummaryScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const { user } = useAuth();
-  const { duration, category, sharedSessionId, withPod } = useLocalSearchParams<{
+  const { duration, category, sharedSessionId } = useLocalSearchParams<{
     duration: string;
     category: string;
     sharedWithName: string;
     sharedSessionId: string;
-    withPod: string;
   }>();
-  // Bara en ensam lådpaus kan bli en natt i efterhand (lib/pauseTags.ts).
-  const sleepable = withPod === '1' && !sharedSessionId;
 
   const seconds = parseInt(duration ?? '0');
   const bellPlayer = useAudioPlayer(require('../assets/images/Bell.mp3'));
@@ -118,7 +115,7 @@ function PauseSummaryScreen() {
     if (handOff) {
       if (handedOffRef.current) return;
       handedOffRef.current = true;
-      setPendingPauseTag(seconds, !!category, true, sleepable);
+      setPendingPauseTag(seconds, !!category, true);
       router.replace('/(tabs)');
       // Startades pausen från *PAUSE TO OPEN* på ett förseglat kuvert, och var
       // den lång nog att låsa upp det, går vägen vidare till kuvertet. Hem

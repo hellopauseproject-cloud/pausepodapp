@@ -8,8 +8,9 @@ import { supabase } from './supabase';
  * man gjort, inte en uppgift. Den ersatte vanemålen, som nästan ingen satte.
  *
  * Bara `kind = 'pause'`: en natt är ingen paus (supabase/sleep.sql).
- * Intentionen ligger som etikett (`READING`) eller id (`read`, lådflödets
- * kö), så båda matchas — samma regel som statistiken och habits.sql.
+ * Intentionen ligger som etikett (`READING`) eller id (`read`, i rader som
+ * appens gamla lådkö skrev), så båda matchas — samma regel som statistiken
+ * och habits.sql.
  *
  * **De otaggade står sist, som en egen rad** (`untagged: true`), och ritas
  * tonade. De räknas från en minut — samma gräns som taggkortet frågar vid —

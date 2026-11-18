@@ -51,11 +51,16 @@ import { supabase } from './supabase';
  *
  * ── Varför ingen server ─────────────────────────────────────────────────────
  *
- * Bara appen kan registrera en paus. `pause_sessions` skrivs från det lådlösa
- * flödet (`app/pausing.tsx`), lådflödets kö (`lib/sessionOutbox.ts`) och
- * krasch-återställningen (`app/_layout.tsx`) — alla tre i appen. Resttiden kan
- * alltså **inte ändras medan appen är stängd**, och därför är en text som
- * räknas ut vid schemaläggningen aldrig gammal när den visas. Ingen
+ * Pausskärmen (`app/pausing.tsx`) och krasch-återställningen
+ * (`app/_layout.tsx`) skriver `pause_sessions`, båda i appen. Resttiden
+ * ändras därför normalt inte medan appen är stängd, och en text som räknas
+ * ut vid schemaläggningen är sällan gammal när den visas.
+ *
+ * **Undantaget är en lådpaus**: `box-session` skriver raden utan att appen
+ * är inblandad, så ligger telefonen i lådan vid klockan 20 kan notisen säga
+ * en resttid som redan är inhämtad. Den rättar sig själv när appen öppnas
+ * (fönstret läggs om vid start och vid `AppState`-byten), och priset är en
+ * notis som ber om en paus man just tagit. Billigare än en push. Ingen
  * push-token, ingen trigger, ingen edge-funktion, inget `pg_net`.
  *
  * Samma insikt ger de framtida dagarna gratis: har appen inte varit öppen

@@ -15,8 +15,7 @@ import { supabase } from './supabase';
  *    som anropar — därför är returtypen `void` och allt ligger i try/catch.
  * 2. **Kön är beständig.** Händelser skrivs till AsyncStorage och skickas i
  *    batch, så ett flygplansläge eller en tvångsstängning inte tappar dem.
- *    Det är samma skäl som [sessionOutbox.ts](sessionOutbox.ts) finns för,
- *    bara med en lägre insats: tappas en skärmvisning är det en lucka i en
+ *    Insatsen är ändå låg: tappas en skärmvisning är det en lucka i en
  *    kurva, inte en förlorad paus.
  * 3. **`occurred_at` sätts vid händelsen, inte vid inserten.** En rad kan
  *    landa timmar senare. Samma skillnad som lådans `ageMs` bär.
@@ -212,7 +211,7 @@ export async function flush(): Promise<void> {
       const { error } = await supabase.from('app_events').insert(sendable);
       if (error) {
         // Inget nät, eller tabellen inte uppsatt än. Kön ligger kvar och
-        // nästa intervall försöker om — precis som sessionOutbox gör.
+        // nästa intervall försöker om.
         console.log('analytics: insert misslyckades, försöker igen senare:', error.message);
         break;
       }

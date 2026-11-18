@@ -2,7 +2,6 @@ import { FontAwesome } from '@expo/vector-icons';
 // `AudioPlayer` är bara en typ här — expo-audio re-exporterar den med
 // `export type *`, så en vanlig värdeimport av den skulle inte hålla.
 import { useAudioPlayer, type AudioPlayer } from 'expo-audio';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { DeviceMotion } from 'expo-sensors';
 import { StatusBar } from 'expo-status-bar';
@@ -34,8 +33,6 @@ import { clearSessionCheckpoint, findCategoryById, logPause, saveSessionCheckpoi
 // i samma rundning som knappen (16 + 16 + textens ~24 ≈ 56).
 const DONE_BTN_RADIUS = 28;
 
-const RESPITE_SECONDS = 30;
-const KEEP_AWAKE_TAG = 'pausing';
 // Hur nära sanningen en tvångsstängd paus hamnar: pulsen är det enda som
 // begränsar felet, och 10 s är omärkligt mot en paus som mäts i minuter.
 const HEARTBEAT_MS = 10000;
@@ -177,7 +174,6 @@ function PausingScreen() {
     category,
     sharedSessionId,
     sharedWithName,
-    withPod,
     pauseType,
     targetSeconds,
   } = useLocalSearchParams<{
@@ -185,7 +181,6 @@ function PausingScreen() {
     /** Bara för en gäst som hängt på en väns paus (Friends). Värdens id
      *  skapas här, ur valet på Hem — se `sharedRef`. */
     sharedSessionId: string;
-    withPod: string;
     sharedWithName: string;
     pauseType: string;
     targetSeconds: string;
@@ -200,21 +195,13 @@ function PausingScreen() {
     sharedSessionId ? { id: sharedSessionId, role: 'guest' } : null,
   );
 
-  // Vilket flöde skärmen visar avgörs av navigeringsparametern, inte av
-  // sessionstillståndet. Tidigare lästes `state.phase === 'idle'` respektive
-  // `state.withPod` vid montering, och det gick sönder så fort en tidigare
-  // paus lämnat skräp efter sig: gick man ur en lådpaus med bakåtknappen låg
-  // `withPod: true` och en icke-idle fas kvar i det globala tillståndet, och
-  // nästa lådlösa paus ärvde dem. Skärmen trodde då att lådan ägde sessionen
-  // — ingen Finish-knapp, och hela vilodetekteringen nedan hoppades över.
-  // Parametern är känd synkront vid montering och kan inte bli inaktuell.
-  //
-  // De två är varandras motsatser: äger lådan sessionen driver den start och
-  // slut själv, annars är det den här skärmen som gör det (lådlöst, eller en
-  // delad paus med en vän som aldrig gick via ritualen — de skickar ingen
-  // withPod alls, vilket är rätt: de är också lådlösa).
-  const isPodFlowRef = useRef(withPod === 'true');
-  const isManualOriginRef = useRef(withPod !== 'true');
+  // Skärmen bar förr två flöden: lådans (där lådan ägde start och slut och
+  // skärmen bara visade dem) och telefonens eget. Vilket det var avgjordes
+  // av navigeringsparametern `withPod`, läst i `isPodFlowRef` /
+  // `isManualOriginRef`. Sedan firmware v8.5 startar appen aldrig en
+  // lådpaus, så den här skärmen är alltid telefonens egen — den startar
+  // pausen, driver vilan och skriver raden själv, och alla de gamla
+  // grenarna är borta i stället för att stå kvar som alltid-sanna.
   const endedHandledRef = useRef(false);
   const autoEndFiredRef = useRef(false);
 
@@ -248,10 +235,10 @@ function PausingScreen() {
   // räknas bakåt från tidpunkten, och natten börjar vid midnatt eller vid
   // läggningen efter den (`runStartRef`), det som är senast.
   //
-  // Bara en vanlig lådlös paus. En natt är redan en natt, regulate har ett
-  // eget slut, och lådans session ägs av lådan.
+  // Bara en vanlig paus. En natt är redan en natt, och regulate har ett
+  // eget slut.
   const midnightAtRef = useRef<number | null>(
-    !isSleep && withPod !== 'true' && pauseType !== 'regulate' ? nextMidnight(Date.now()) : null,
+    !isSleep && pauseType !== 'regulate' ? nextMidnight(Date.now()) : null,
   );
   const runStartRef = useRef<number | null>(null);
   const nightRef = useRef<{ startMs: number; dayMs: number } | null>(null);
@@ -351,9 +338,8 @@ function PausingScreen() {
   const pulse2 = useRef(new Animated.Value(1)).current;
   const pulse3 = useRef(new Animated.Value(1)).current;
 
-  // ── Starta manuellt om vi kom hit utan att ha gått via lådans ritual ──
+  // ── Starta pausen ──
   useEffect(() => {
-    if (!isManualOriginRef.current) return;
     const isRegulate = pauseType === 'regulate';
     // Vännerna valda på Hem bjuds in nu, i samma stund som pausen börjar.
     // Valet tas (och töms) här och inte på Hem, så att det följer med vilken
@@ -369,9 +355,8 @@ function PausingScreen() {
       }
     }
     const shared = sharedRef.current;
-    // Det lådlösa flödets motsvarighet till placeinbox.tsx `pause_started`.
-    // Samma namn med flit: tratten ska kunna räkna starter utan att bry sig
-    // om vilket flöde det var, och `with_pod` skiljer dem när det behövs.
+    // Pausens start i tratten (analytics.pause_funnel). Lådans pauser
+    // räknas inte här: de passerar aldrig appen.
     // En natt är ingen start i pausens tratt — `startSleep()` loggar sin egen.
     if (!isSleep) {
       track('pause_started', {
@@ -385,7 +370,6 @@ function PausingScreen() {
     dispatch({
       type: 'SESSION_STARTED',
       seq: generateLocalSeq(),
-      withPod: withPod === 'true',
       pauseType: (isSleep ? 'sleep' : isRegulate ? 'regulate' : 'session') as PauseType,
       targetSeconds: isRegulate ? parseInt(targetSeconds ?? '0', 10) : undefined,
       category: category || undefined,
@@ -405,14 +389,14 @@ function PausingScreen() {
   // användarens. Klockan påverkas inte av att JS fryser — computeElapsedMs
   // räknar från state.startedAt, inte från tickarna, så tiden stämmer när
   // skärmen väcks igen. ──
-  useEffect(() => {
-    if (!isPodFlowRef.current) return;
-    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
-    return () => { deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {}); };
-  }, []);
+  // Höll skärmen vaken, men bara i lådflödet: där låg telefonen i en låda
+  // och skärmen behövde inte spara batteri. En telefonpaus ska tvärtom
+  // släcka skärmen av sig själv, så med lådflödet borta finns ingen som
+  // håller den vaken — och det är rätt.
+
 
   // ── Lämnas skärmen utan att pausen avslutats (bakåtknappen) är den
-  // övergiven, och måste städas bort. Annars ligger fasen och withPod kvar i
+  // övergiven, och måste städas bort. Annars ligger fasen kvar i
   // det globala tillståndet och ärvs av nästa paus — det var så en lådlös
   // paus kunde starta utan Finish-knapp och utan vilodetektering, och det
   // hade slagit lika hårt åt andra hållet: ENTER_CHECKIN no-opar om fasen
@@ -423,7 +407,7 @@ function PausingScreen() {
   // en lådsession lever vidare i lådan även när skärmen lämnas, och ägs av
   // _layout ända fram till session_ended. ──
   useEffect(() => () => {
-    if (!isManualOriginRef.current || endedHandledRef.current) return;
+    if (endedHandledRef.current) return;
     clearSessionCheckpoint().catch(() => {});
     // En övergiven delad paus stänger dörren (värd) eller kliver ur (gäst),
     // utan att påstå någon längd — pausen sparas ju inte.
@@ -441,7 +425,7 @@ function PausingScreen() {
   // SQL. `hasRestedRef`, för fasen är 'active' en stund innan telefonen lagts
   // ner. Lådans paus räknas när den sparas, av en trigger.
   useEffect(() => {
-    if (!isManualOriginRef.current || isSleep || !hasRestedRef.current) return;
+    if (isSleep || !hasRestedRef.current) return;
     if (state.phase === 'active') reportGlobalPause('running');
     else if (state.phase === 'respite') reportGlobalPause('held');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -454,8 +438,6 @@ function PausingScreen() {
   // en telefon som ligger nedåtvänd går inte att scrolla i. Plattformarna
   // rapporterar g.z spegelvänt — se isFaceDown i lib/tilt.ts. ──
   useEffect(() => {
-    console.log('FaceDown: effekt kör, isPodFlow=', isPodFlowRef.current, 'param withPod=', withPod);
-    if (isPodFlowRef.current) return;
     let cancelled = false;
     let sub: { remove: () => void } | null = null;
 
@@ -601,7 +583,6 @@ function PausingScreen() {
   // telefonen vänts upp och lagts ner igen. Samma avsteg fick alltså ett tal
   // eller inget tal beroende på om AppState råkade fyra. ──
   useEffect(() => {
-    if (isPodFlowRef.current) return;
     const sub = AppState.addEventListener('change', next => {
       appActiveRef.current = next === 'active';
       if (next === 'active') {
@@ -641,11 +622,12 @@ function PausingScreen() {
     return () => sub.remove();
   }, []);
 
-  // ── is_pausing-flaggan, oavsett flöde ──
+  // ── is_pausing-flaggan ──
   //
-  // Skärmens montering ÄR pausen, för båda flödena: det lådlösa navigerar hit
-  // själv, och lådflödet hamnar här via placeinbox eller _layout:s
-  // återanslutningsrutt. Därför sätts flaggan här och ingen annanstans.
+  // Skärmens montering ÄR pausen: hit navigerar man när den startar, och
+  // härifrån lämnar man när den slutar. Därför sätts flaggan här och ingen
+  // annanstans i appen. (En lådpaus sätter den på servern i stället, i
+  // `record_box_session_start()` — lådan har ingen skärm här.)
   //
   // Ordningen mellan `true` och `false` — och mot nollningen vid appstart i
   // [app/_layout.tsx](_layout.tsx) — ligger i [lib/pausingFlag.ts](../lib/pausingFlag.ts).
@@ -662,8 +644,8 @@ function PausingScreen() {
     return () => { setPausingFlag(uid, false); };
   }, [user?.id, isSleep]);
 
-  // ── Krasch-checkpoint — bara för det manuella flödet. Lådans egen
-  // state-synk vid återanslutning (se _layout.tsx) täcker box-flödet.
+  // ── Krasch-checkpoint. En lådpaus behöver ingen: lådan räknar den själv
+  // och laddar upp den när den är klar, oberoende av appen.
   //
   // Skrivs om som en puls, inte en enda gång vid start. En tvångsstängd app
   // får aldrig köra någon kod — ingen städning, inget slutvärde — så utan
@@ -672,7 +654,7 @@ function PausingScreen() {
   // timmar. Sista skrivningen sker när appen lämnar förgrunden, eftersom JS
   // fryser strax därefter och intervallet då slutar ticka. ──
   useEffect(() => {
-    if (!isManualOriginRef.current || !user?.id || state.phase !== 'active') return;
+    if (!user?.id || state.phase !== 'active') return;
 
     // `runningAtLeave` är bara sant i skrivningen när appen lämnas, och bara
     // om klockan fortfarande går då (nedåtvänd och still — frysningen ovan
@@ -713,7 +695,7 @@ function PausingScreen() {
     });
 
     return () => { clearInterval(interval); appStateSub.remove(); };
-  }, [isManualOriginRef.current, user?.id, state.phase, state.startedAt]);
+  }, [user?.id, state.phase, state.startedAt]);
 
   // ── Pulsanimation ──
   useEffect(() => {
@@ -750,18 +732,15 @@ function PausingScreen() {
     ? Math.max(0, (state.targetSeconds ?? 0) - Math.floor(elapsedMs / 1000))
     : Math.floor(elapsedMs / 1000);
 
-  const respiteSecondsLeft = state.respiteStartedAt
-    ? Math.max(0, RESPITE_SECONDS - Math.floor((Date.now() - state.respiteStartedAt) / 1000))
-    : RESPITE_SECONDS;
 
   // Här bokades förr en notis som gick av när nedräkningen tog slut. Appen
   // skickar inga notiser längre, så en nedräkning som löper ut med skärmen
   // släckt når ingen förrän appen väcks igen — auto-avslutet nedan kör först
   // då. Det är en känd följd av borttagningen, inte en lucka.
 
-  // ── Regulate-nedräkning (bara lådlöst) tar slut av sig själv ──
+  // ── Regulate-nedräkningen tar slut av sig själv ──
   useEffect(() => {
-    if (!isManualOriginRef.current || !isRegulate || autoEndFiredRef.current) return;
+    if (!isRegulate || autoEndFiredRef.current) return;
     if (seconds > 0) return;
     autoEndFiredRef.current = true;
     dispatch({
@@ -835,7 +814,7 @@ function PausingScreen() {
   // till /pausesummary sköts globalt i _layout.tsx, oavsett vilken skärm
   // som råkar vara monterad när lådan säger att sessionen är slut. ──
   useEffect(() => {
-    if (state.phase !== 'ended' || !state.lastEnded || !isManualOriginRef.current || endedHandledRef.current) return;
+    if (state.phase !== 'ended' || !state.lastEnded || endedHandledRef.current) return;
     endedHandledRef.current = true;
 
     // En natt skrivs som en sömnrad och ingenting annat: ingen krets, ingen
@@ -888,7 +867,9 @@ function PausingScreen() {
           intention: intentionLabel,
           is_shared: !!shared,
           shared_session_id: shared?.id ?? null,
-          with_pod: state.withPod,
+          // Appens pauser är alltid telefonens egna. `with_pod = true`
+          // skrivs bara av `record_box_session()` på servern.
+          with_pod: false,
           completed: state.lastEnded!.completed,
         }).select('id').single();
         if (error) console.log('pause_sessions insert error:', JSON.stringify(error));
@@ -960,7 +941,7 @@ function PausingScreen() {
   // fönstret och syns inte här — därför är fältet gömt medan klockan går
   // (lib/pauseNavBar.ts), och svepet som tar fram det är det som fångas.
   const freezeInHand = (source: 'touch' | 'nav_bar') => {
-    if (isPodFlowRef.current || !restingRef.current || !hasRestedRef.current) return;
+    if (!restingRef.current || !hasRestedRef.current) return;
     const now = Date.now();
     touchLockRef.current = true;
     restingRef.current = false;
@@ -980,13 +961,11 @@ function PausingScreen() {
   // en händelse inom NAV_BAR_SETTLE_MS från en växling räknas inte.
   const navBarToggledAtRef = useRef(0);
   useEffect(() => {
-    if (isPodFlowRef.current) return;
     navBarToggledAtRef.current = Date.now();
     if (state.phase === 'active' && hasRestedRef.current) hideNavBar();
     else showNavBar();
   }, [state.phase]);
   useEffect(() => {
-    if (isPodFlowRef.current) return;
     const off = onNavBarShown(() => {
       if (!appActiveRef.current) return;
       if (Date.now() - navBarToggledAtRef.current < NAV_BAR_SETTLE_MS) return;
@@ -1027,35 +1006,22 @@ function PausingScreen() {
         )}
       </View>
 
-      {/* Lådan äger avslutet i box-flödet — ingen "Klar"-knapp där.
-          Finish hålls in, som PAUSE: att avsluta är lika avsiktligt som att
-          börja, och ett snuddat tryck ska inte ta slut på en paus. Samma
-          `finishPause` som förut — bara gesten och färgen är nya. */}
-      {isManualOriginRef.current && (
-        <HoldToStartButton
-          style={styles.doneButton}
-          onComplete={() => finishPause()}
-          holdMs={HOLD_TO_START_MS}
-          borderRadius={DONE_BTN_RADIUS}
-          accessibilityLabel={finishA11y}
-          hintStyle={styles.holdHint}
-        >
-          <Text style={styles.doneText}>{finishLabel}</Text>
-        </HoldToStartButton>
-      )}
+      {/* Finish hålls in, som PAUSE: att avsluta är lika avsiktligt som att
+          börja, och ett snuddat tryck ska inte ta slut på en paus. */}
+      <HoldToStartButton
+        style={styles.doneButton}
+        onComplete={() => finishPause()}
+        holdMs={HOLD_TO_START_MS}
+        borderRadius={DONE_BTN_RADIUS}
+        accessibilityLabel={finishA11y}
+        hintStyle={styles.holdHint}
+      >
+        <Text style={styles.doneText}>{finishLabel}</Text>
+      </HoldToStartButton>
 
-      {state.phase === 'respite' && isPodFlowRef.current && (
-        <View style={styles.lidOpenOverlay}>
-          <Text style={styles.lidOpenTitle}>{respiteSecondsLeft}</Text>
-          <Text style={styles.lidOpenSubtitle}>
-            Close the lid{'\n'}to continue
-          </Text>
-        </View>
-      )}
-
-      {/* Lådlös vila: instruktionen ÄR gesten. Klockan syns kvar så det
-          framgår att ingenting gått förlorat, bara stannat. */}
-      {state.phase === 'respite' && !isPodFlowRef.current && (
+      {/* Vilan: instruktionen ÄR gesten. Klockan syns kvar så det framgår
+          att ingenting gått förlorat, bara stannat. */}
+      {state.phase === 'respite' && (
         <View style={styles.lidOpenOverlay}>
           <Text style={styles.restTitle}>PUT PHONE{'\n'}FACE DOWN</Text>
           <Text style={styles.restTimer}>{formatTime(seconds)}</Text>
@@ -1161,12 +1127,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     justifyContent: 'center',
     zIndex: 100,
     gap: 16,
-  },
-  lidOpenTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: Palette.textPrimary,
-    textAlign: 'center',
   },
   lidOpenSubtitle: {
     fontSize: 16,

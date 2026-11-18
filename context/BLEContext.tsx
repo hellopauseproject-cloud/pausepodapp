@@ -1,18 +1,22 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+// Anslutningen till lådan, och allt lådan säger om sig själv.
+//
+// Sedan firmware v8.5 startar appen aldrig en lådpaus, så det här är inte
+// längre en kanal appen *styr* lådan genom — den skickar ingenting. Lådan
+// berättar vilken låda den är, om den har nät och hur mycket batteri den
+// har; appen lyssnar. Det är därför den gamla BLEMessageContext med sina
+// prenumeranter och sändare (`set_mode`, `phone_down`, `phone_up`,
+// `session_ack`) är borta: det fanns ingen händelse kvar att prenumerera
+// på, bara tillstånd, och tillstånd hör hemma i den här contexten.
+
+import React, { createContext, useContext, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import type { Device } from 'react-native-ble-plx';
 import { ConnectionPriority, manager } from './bleManager';
 import { track } from '../lib/analytics';
-import { BoxMessage, encodePhoneDown, encodePhoneUp, encodeSessionAck, encodeSetMode, parseBoxMessage } from '../lib/bleProtocol';
+import { parseBoxMessage } from '../lib/bleProtocol';
 
 const SERVICE_UUID = '12345678-1234-1234-1234-123456789012';
 const CHARACTERISTIC_UUID = 'abcdefab-cdef-abcd-efab-cdefabcdefab';
-
-// Vilken låda den här telefonen senast parades med. Ett riktigt
-// parningsflöde (byta låda från profilen) är utanför scope här —
-// första lådan som säger hello blir "vår" tills vidare.
-const PAIRED_BOX_KEY = 'paired_box_id';
 
 const REQUESTED_MTU = 185;
 const RECONNECT_DELAY_MS = 1500;
@@ -31,32 +35,16 @@ export const BLEControlContext = createContext<{
   disconnect: () => void;
   isConnected: boolean;
   isScanning: boolean;
-  /** Id på den låda vi just nu är anslutna till, om någon. */
-  boxId: string | null;
-  /** Är den anslutna lådan samma som senast parades med den här telefonen?
-   *  Styr om lådans `state`-meddelande får kapa skärmen (se BLEContext). */
-  isPairedBox: boolean;
-  /** Samma värde som isPairedBox, men läsbart synkront (ref, inte state).
-   *  hello och state kommer i snabb följd vid varje ny anslutning — ett
-   *  React-state-baserat isPairedBox hinner inte alltid uppdateras innan
-   *  state-meddelandet redan processats, vilket tyst kastar RESTORE.
-   *  SessionContext läser den här istället för isPairedBox-booleanen. */
-  isPairedBoxRef: React.RefObject<boolean>;
-  /** Lådans serverkända id (BOX001), ur `boxid`. Null i äldre firmware. */
+  /** Lådans serverkända id (BOX001), ur `boxid`. Null i äldre firmware.
+   *  Parningen i AsyncStorage är borta: den fanns bara för att hindra en
+   *  främmande låda från att kapa skärmen med sitt `state`, och appen går
+   *  inte in i någon lådas paus längre. Lådan säger vem den är vid varje
+   *  anslutning, så det finns inget att minnas mellan dem. */
   serverBoxId: string | null;
   /** Lådans nätverksläge, ur `net`. Null i äldre firmware. */
   netStatus: BoxNetStatus | null;
-} | null>(null);
-
-export const BLEMessageContext = createContext<{
-  /** Prenumerera på varje meddelande från lådan. Returnerar avregistreraren.
-   *  Handlers anropas synkront från BLE-callbacken — se motiveringen vid
-   *  messageHandlersRef i BLEProvider för varför det inte är en state-slot. */
-  subscribeToBoxMessages: (handler: (message: BoxMessage) => void) => () => void;
-  sendSessionAck: (seq: string) => Promise<void>;
-  sendSetMode: (mode: string, direction: 'UP' | 'DOWN', seconds: number) => Promise<void>;
-  sendPhoneDown: () => Promise<void>;
-  sendPhoneUp: () => Promise<void>;
+  /** Lådans batteri i procent, ur `battery`. Null tills den sagt något. */
+  batteryPercent: number | null;
 } | null>(null);
 
 const isConnectingRef = { current: false };
@@ -66,35 +54,10 @@ const subscriptionRef = { current: null as any };
 export function BLEProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const [boxId, setBoxId] = useState<string | null>(null);
   const [serverBoxId, setServerBoxId] = useState<string | null>(null);
   const [netStatus, setNetStatus] = useState<BoxNetStatus | null>(null);
-  const [isPairedBox, setIsPairedBox] = useState(false);
-  const isPairedBoxRef = useRef(false);
+  const [batteryPercent, setBatteryPercent] = useState<number | null>(null);
   const deviceRef = useRef<Device | null>(null);
-
-  // Ett lyssnarregister, inte en useState-slot. Lådan skickar flera notiser
-  // i samma andetag (checkin_complete + session_started; hello + state +
-  // battery). Med en enda state-slot hann de krocka i React: passiva
-  // effekter kör efter commit, så meddelande nr 2 kunde sättas innan nr 1:s
-  // effekt hunnit köra sin resetMessage() — nollställningen lades då sist i
-  // kön och skrev över nr 2, som aldrig nådde reducern. Det var därför
-  // session_started tystnade och appen fastnade i 'checked_in'. Handlers
-  // anropas synkront härifrån; ingenting kan skrivas över på vägen.
-  const messageHandlersRef = useRef(new Set<(message: BoxMessage) => void>());
-
-  const subscribeToBoxMessages = useCallback((handler: (message: BoxMessage) => void) => {
-    messageHandlersRef.current.add(handler);
-    return () => { messageHandlersRef.current.delete(handler); };
-  }, []);
-
-  // Förladdad en gång vid mount, långt innan någon BLE-anslutning hinner bli
-  // klar — annars skulle handleHello() behöva invänta AsyncStorage varje
-  // gång, vilket är precis den lucka som orsakar race:en beskriven ovan.
-  const pairedBoxIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    AsyncStorage.getItem(PAIRED_BOX_KEY).then(v => { pairedBoxIdRef.current = v; });
-  }, []);
 
   const requestPermissions = async () => {
     if (Platform.OS === 'android') {
@@ -104,51 +67,6 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
         PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
       ]);
     }
-  };
-
-  const sendRaw = async (message: string) => {
-    if (!deviceRef.current) {
-      console.log('BLE: Kan inte skicka (ingen ansluten enhet):', message);
-      return;
-    }
-    const base64 = btoa(message);
-    // Diagnostik för trunkerings-buggen: jämför tecken-antalet här mot vad
-    // lådans seriemonitor loggar att den tog emot. Padding ska alltid landa
-    // på ett '=' -antal så att base64-längden är delbar med 4.
-    console.log(
-      `BLE: Skickar "${message}" (${message.length} tecken rått) -> base64 "${base64}" (${base64.length} tecken, %4=${base64.length % 4})`
-    );
-    try {
-      await manager.writeCharacteristicWithResponseForDevice(
-        deviceRef.current.id,
-        SERVICE_UUID,
-        CHARACTERISTIC_UUID,
-        base64
-      );
-      console.log('BLE: Skickade', message);
-    } catch (e) {
-      console.log('BLE: Fel vid skrivning av', message, e);
-    }
-  };
-
-  // hello konsumeras här internt — den blir aldrig ett boxMessage som
-  // vidarebefordras till SessionContext. Lådan tar emot time_sync men
-  // ignorerar det — skickas inte längre.
-  //
-  // Måste vara synkron. state kommer direkt efter hello vid varje ny
-  // anslutning — om den här hade väntat på AsyncStorage (som tidigare)
-  // hinner monitorCharacteristicForService-callbacken för state redan
-  // köras med det gamla (stale) isPairedBox-värdet, och RESTORE kastas
-  // tyst. pairedBoxIdRef är därför förladdad vid mount istället.
-  const handleHello = (boxIdFromDevice: string) => {
-    setBoxId(boxIdFromDevice);
-    if (!pairedBoxIdRef.current) {
-      pairedBoxIdRef.current = boxIdFromDevice;
-      AsyncStorage.setItem(PAIRED_BOX_KEY, boxIdFromDevice).catch(() => {});
-    }
-    const paired = pairedBoxIdRef.current === boxIdFromDevice;
-    isPairedBoxRef.current = paired;
-    setIsPairedBox(paired);
   };
 
   const connectToPausePod = async () => {
@@ -201,17 +119,13 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
               track('box_connected');
 
               // Måste prenumereras INNAN MTU/prioritet förhandlas. Lådan
-              // skickar hello+state+battery direkt vid anslutning
+              // skickar hello+boxid+net+battery direkt vid anslutning
               // (onConnectedHandshake i .ino) — notiser som kommer innan vi
               // hunnit skriva CCCD (dvs innan monitorCharacteristicForService
               // är klar) tappas helt av BLE-stacken, ingen kö, inget
               // ombesänt. Låg vi kvar bakom requestMTU + requestConnectionPriority
-              // (två extra tur-och-retur) missade vi ofta hela handskakningen.
-              // Ofarligt vid en förstagångsanslutning (state är bara 'idle'
-              // då), men dödligt vid återanslutning mitt i en session — state
-              // är appens ENDA sätt att återfå fasen, och utan den fastnar
-              // appen på skärmen den hade före tappet medan lådan fortsätter
-              // räkna för sig själv.
+              // (två extra tur-och-retur) missade vi ofta hela handskakningen,
+              // och då stod statussidan tom för en låda som faktiskt svarade.
               subscriptionRef.current = connected.monitorCharacteristicForService(
                 SERVICE_UUID,
                 CHARACTERISTIC_UUID,
@@ -226,27 +140,25 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
                   const parsed = parseBoxMessage(decoded);
                   if (!parsed) return;
 
-                  if (parsed.type === 'hello') {
-                    handleHello(parsed.boxId);
-                    return;
+                  // Allt lådan säger är tillstånd, och allt tillstånd landar
+                  // här. `hello` (chip-id), `state` och `ready_to_close` har
+                  // ingen läsare än — se lib/bleProtocol.ts.
+                  switch (parsed.type) {
+                    case 'boxid':
+                      setServerBoxId(parsed.serverBoxId);
+                      break;
+                    case 'net':
+                      setNetStatus({
+                        wifiUp: parsed.wifiUp,
+                        networkSaved: parsed.networkSaved,
+                        queued: parsed.queued,
+                        ssid: parsed.ssid,
+                      });
+                      break;
+                    case 'battery':
+                      setBatteryPercent(parsed.percent);
+                      break;
                   }
-                  // boxid och net är lådans *tillstånd* och inte händelser i
-                  // ritualen: de hamnar i state här istället för hos
-                  // prenumeranterna, på samma sätt som hello.
-                  if (parsed.type === 'boxid') {
-                    setServerBoxId(parsed.serverBoxId);
-                    return;
-                  }
-                  if (parsed.type === 'net') {
-                    setNetStatus({
-                      wifiUp: parsed.wifiUp,
-                      networkSaved: parsed.networkSaved,
-                      queued: parsed.queued,
-                      ssid: parsed.ssid,
-                    });
-                    return;
-                  }
-                  messageHandlersRef.current.forEach(handler => handler(parsed));
                 }
               );
 
@@ -307,13 +219,12 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
     isConnectedRef.current = false;
     isConnectingRef.current = false;
     setIsConnected(false);
-    setBoxId(null);
-    setIsPairedBox(false);
-    isPairedBoxRef.current = false;
-    // Nätverksläget gäller den låda vi var anslutna till. Stod det kvar
-    // skulle statussidan visa en annan lådas wifi som om det var den här.
+    // Allt lådan sagt om sig själv gäller den låda vi var anslutna till.
+    // Stod det kvar skulle statussidan visa en annan lådas wifi och batteri
+    // som om det var den här.
     setServerBoxId(null);
     setNetStatus(null);
+    setBatteryPercent(null);
   };
 
   const disconnect = () => {
@@ -321,31 +232,16 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
     resetConnectionState();
   };
 
-  const sendSessionAck = (seq: string) => sendRaw(encodeSessionAck(seq));
-  const sendSetMode = (mode: string, direction: 'UP' | 'DOWN', seconds: number) =>
-    sendRaw(encodeSetMode(mode, direction, seconds));
-  const sendPhoneDown = () => sendRaw(encodePhoneDown());
-  const sendPhoneUp = () => sendRaw(encodePhoneUp());
-
   const controlValue = {
-    connectToPausePod, disconnect, isConnected, isScanning, boxId, isPairedBox,
-    isPairedBoxRef, serverBoxId, netStatus,
+    connectToPausePod, disconnect, isConnected, isScanning,
+    serverBoxId, netStatus, batteryPercent,
   };
-  const messageValue = { subscribeToBoxMessages, sendSessionAck, sendSetMode, sendPhoneDown, sendPhoneUp };
 
   return (
     <BLEControlContext.Provider value={controlValue}>
-      <BLEMessageContext.Provider value={messageValue}>
-        {children}
-      </BLEMessageContext.Provider>
+      {children}
     </BLEControlContext.Provider>
   );
-}
-
-export function useBLE() {
-  const ctx = useContext(BLEMessageContext);
-  if (!ctx) throw new Error('useBLE måste användas inom BLEProvider');
-  return ctx;
 }
 
 export function useBLEControl() {
