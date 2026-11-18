@@ -1,7 +1,6 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { router, Stack, useGlobalSearchParams, usePathname, useSegments } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import { DeviceMotion } from 'expo-sensors';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, View } from 'react-native';
@@ -9,7 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { AppThemeProvider, usePalette, useTheme } from '../contexts/ThemeContext';
-import { BLEProvider, useBLE, useBLEControl } from '../context/BLEContext';
+import { BLEProvider, useBLEControl } from '../context/BLEContext';
 import { SessionProvider, useSession } from '../context/SessionContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { initAnalytics, track } from '../lib/analytics';
@@ -24,17 +23,9 @@ import { supabase } from '../lib/supabase';
 import { reportGlobalPause } from '../lib/globalPause';
 import { closePauseInvites, finishPauseInvite } from '../lib/pauseInvites';
 import { clearStalePausingFlag, setPausingFlag } from '../lib/pausingFlag';
-import { flushOutbox } from '../lib/sessionOutbox';
 import { markNightEnded, nextMidnight } from '../lib/homeMode';
 import { saveSleepSession } from '../lib/sleep';
-import { tiltDegrees } from '../lib/tilt';
 import { clearSessionCheckpoint, findCategoryById, loadSessionCheckpoint, logPause } from './pauseLogger';
-
-// Lyft-detektering: se motiveringen vid useEffect nedan för varför den är
-// tillståndsbaserad (kollar "står den upp just nu?") istället för att bara
-// lita på övergångar i en kontinuerlig lyssnare.
-const UP_MIN_TILT_DEG = 45;
-const UP_STABLE_MS = 300;
 
 // Hur färskt ett notistryck måste vara för att få styra vart appen landar vid
 // en kallstart. `getLastNotificationResponseAsync` minns det senaste trycket
@@ -54,7 +45,6 @@ function InnerLayout() {
   const { mode } = useTheme();
   const Palette = usePalette();
   const { connectToPausePod } = useBLEControl();
-  const { sendPhoneUp } = useBLE();
   const { state: sessionState, dispatch: sessionDispatch } = useSession();
   const { user, loading, onboardingCompleted } = useAuth();
 
@@ -103,18 +93,7 @@ function InnerLayout() {
   type NotificationTap = { type?: string; circle_id?: string; shared_id?: string } | null;
   const pendingTapRef = useRef<NotificationTap>(null);
   const openFromNotificationRef = useRef<((data: NotificationTap) => void) | null>(null);
-  const restoreRoutedSeqRef = useRef<string | null>(null);
   const summaryHandledSeqRef = useRef<string | null>(null);
-  // Nyckel är seq+fas, inte bara seq — annars låser ett (av lådan ignorerat)
-  // skick under 'active' spärren permanent för resten av sessionen och
-  // blockerar det riktiga skicket när fasen väl blir 'respite'.
-  const phoneUpSentKeyRef = useRef<string | null>(null);
-
-  // sendPhoneUp byter identitet varje render av BLEProvider (inte
-  // memoiserad) — en ref håller lyft-effekten fri från den som dep.
-  const sendPhoneUpRef = useRef(sendPhoneUp);
-  sendPhoneUpRef.current = sendPhoneUp;
-
   useEffect(() => {
     connectToPausePod();
   }, []);
@@ -162,9 +141,9 @@ function InnerLayout() {
   //   hoppas över av samma skäl som i händelseloggen ovan.
   //
   // Den globala `phase === 'ended'`-effekten längre ner vore den uppenbara
-  // fjärde platsen — den ser slutet på båda flödena — men raden i
+  // fjärde platsen — den ser slutet på varje paus — men raden i
   // `pause_sessions` är inte skriven än i det ögonblicket (pausing.tsx
-  // respektive sessionOutbox.ts skriver den), så en synk där hade räknat med
+  // skriver den), så en synk där hade räknat med
   // en paus som inte syns i RPC:n. 'background' kommer efter den, och är
   // dessutom det enda som behöver stämma: notisen går klockan 20.
   //
@@ -293,55 +272,22 @@ function InnerLayout() {
     return () => sub.remove();
   }, [user?.id]);
 
-  // Försök synka allt som ligger kvar i den lokala kön (t.ex. sessioner som
-  // ackades mot lådan innan appen hade nät) varje gång appen startar.
-  useEffect(() => {
-    flushOutbox().catch(() => {});
-  }, [user?.id]);
-
   // Appen rör aldrig skärmens ljusstyrka. Här låg förr ett skyddsnät som
   // återställde placeinbox-dimningen; både den och dimningen är borta, och
   // ljusstyrkan är helt och hållet systemets inställning.
-
-  // Om lådan hör av sig med ett pågående tillstånd (state:) efter att appen
-  // startat om — hoppa rakt in i rätt skärm istället för att landa på
-  // hemskärmen med en låda som redan räknar. Bara den parade lådans state
-  // dispatchas som RESTORE (se SessionContext), så det här körs aldrig för
-  // en främmande låda.
-  useEffect(() => {
-    if (!user) return;
-    const { phase, seq } = sessionState;
-    // BARA lådsessioner. En lådlös paus äger sin egen skärm och har redan
-    // navigerat dit själv — utan den här kontrollen slog effekten till i
-    // samma ögonblick som pausing.tsx dispatchade SESSION_STARTED (ny seq,
-    // fas 'active') och ersatte rutten med withPod: 'true' hårdkodat. Skärmen
-    // läste då om parametern som 'true', trodde att lådan ägde sessionen och
-    // tappade både Finish-knappen och hela vilodetekteringen.
-    if (!sessionState.withPod) return;
-    if (phase === 'idle' || phase === 'ended') return;
-    if (!seq || restoreRoutedSeqRef.current === seq) return;
-    restoreRoutedSeqRef.current = seq;
-
-    if (phase === 'active' || phase === 'respite') {
-      router.replace({
-        pathname: '/pausing',
-        params: { mode: 'session', withPod: 'true' },
-      } as never);
-    } else {
-      router.replace({
-        pathname: '/placeinbox',
-        params: { mode: 'session', withPod: 'true' },
-      } as never);
-    }
-  }, [sessionState.phase, sessionState.seq, sessionState.withPod, user]);
+  //
+  // Här låg också två saker som försvann med lådflödet: en tömning av
+  // `lib/sessionOutbox.ts` vid varje appstart, och en routning som hoppade
+  // rakt in i pausskärmen när lådan hörde av sig med en pågående session
+  // (`state:` → RESTORE). Lådan laddar upp sina egna pauser över WiFi sedan
+  // firmware v8.5, så det finns ingen kö att tömma och ingen paus att hoppa
+  // in i — en app som gjorde det skulle lägga sig i en paus den inte äger.
 
   // Sessionen är slut — oavsett vilken skärm som råkar vara monterad.
-  // Box-flödet har redan skrivit till outboxen och ackat (SessionContext);
-  // det lådlösa flödets Supabase-skrivningar sköts fortfarande i
-  // pausing.tsx (se där), men reset + navigering till summeringen är
-  // gemensam för båda och hör hemma globalt — annars missas den om
-  // appen startats om och lådan levererar en köad session_ended innan
-  // någon pausing.tsx-skärm hunnit monteras.
+  // Pausens rad i pause_sessions skrivs i pausing.tsx (se där), men reset +
+  // navigering till summeringen hör hemma globalt: skärmen kan ha hunnit
+  // avmonteras, och krasch-återställningen nedan avslutar pauser utan att
+  // någon pausing.tsx finns.
   useEffect(() => {
     const { phase, lastEnded } = sessionState;
     if (phase !== 'ended' || !lastEnded) return;
@@ -363,15 +309,12 @@ function InnerLayout() {
     const sharedWithName = sessionState.sharedWithName ?? '';
     const sharedSessionId = sessionState.sharedSessionId ?? '';
 
-    // Den enda platsen som ser SLUTET på båda flödena — lådans och det
-    // lådlösa. Pausens rad i pause_sessions skrivs på två andra ställen
-    // (pausing.tsx respektive sessionOutbox.ts), men tratten i
-    // analytics.pause_funnel ska kunna jämföra "startade" med "slutförde"
-    // utan att veta vilket flöde det var.
+    // Tratten i analytics.pause_funnel jämför "startade" med "slutförde".
+    // Fältet `with_pod` är borta: appens pauser är alltid telefonens egna,
+    // och lådans pauser passerar aldrig appen (de skrivs av `box-session`).
     track('pause_completed', {
       duration_seconds: Number(duration),
       completed: lastEnded.completed,
-      with_pod: sessionState.withPod,
       category: sessionState.category ?? null,
       shared: !!sessionState.sharedSessionId,
     });
@@ -380,85 +323,16 @@ function InnerLayout() {
 
     router.replace({
       pathname: '/pausesummary',
-      // `withPod`: bara en lådpaus kan taggas som natt (lib/pauseTags.ts).
-      params: { duration, category, sharedWithName, sharedSessionId, withPod: sessionState.withPod ? '1' : '' },
+      params: { duration, category, sharedWithName, sharedSessionId },
     } as never);
-  }, [sessionState.phase, sessionState.lastEnded, sessionState.category, sessionState.sharedWithName, sessionState.sharedSessionId, sessionState.pauseType, sessionState.withPod, sessionDispatch]);
+  }, [sessionState.phase, sessionState.lastEnded, sessionState.category, sessionState.sharedWithName, sessionState.sharedSessionId, sessionState.pauseType, sessionDispatch]);
 
-  // Global lyft-detektering: skickar phone_up bara medan appen vet att en
-  // box-session pågår (efter session_started, före session_ended).
-  //
-  // Frågan detektorn svarar på är "står telefonen upp JUST NU?", inte "har
-  // den nyss rest sig?" — annars skulle ett lyft som redan skett medan
-  // telefonen låg i lådan med skärmen av aldrig fångas.
-  //
-  // Prenumerationen lever kvar under HELA den väpnade perioden (samma
-  // seq+fas) — den återskapas inte vid varje omrendering. Tidigare låg
-  // stabilitetstimern (upSinceMs) i effektens closure och nollställdes vid
-  // varje omprenumerering; på vissa enheter/lägen växlar AppState till
-  // 'active' upprepade gånger under en och samma paus (utan att någon
-  // annan kod i det här repot lyssnar på eller orsakar det — troligen ett
-  // plattforms-/New Architecture-relaterat AppState-beteende), vilket rev
-  // ner och byggde upp lyssnaren så ofta att stabilitetströskeln aldrig
-  // nåddes, eller i värsta fall att ingen sensoravläsning ens hann komma in
-  // innan lyssnaren revs. Timern ligger nu i en ref som överlever
-  // omrenderingar av oberoende anledningar.
-  const upSinceMsRef = useRef<number | null>(null);
-  const lastTiltLogMsRef = useRef(0);
-
-  useEffect(() => {
-    const armed = sessionState.withPod && (sessionState.phase === 'active' || sessionState.phase === 'respite');
-    console.log('LiftDetect: fas=', sessionState.phase, 'withPod=', sessionState.withPod, 'armed=', armed);
-    if (!armed) return;
-    const key = `${sessionState.seq}:${sessionState.phase}`;
-    if (phoneUpSentKeyRef.current === key) {
-      console.log('LiftDetect: redan skickat för', key, '— hoppar över');
-      return;
-    }
-
-    let cancelled = false;
-    let sub: { remove: () => void } | null = null;
-    upSinceMsRef.current = null;
-
-    (async () => {
-      await DeviceMotion.requestPermissionsAsync();
-      if (cancelled) return;
-
-      console.log('LiftDetect: prenumererar (key=', key, ')');
-      DeviceMotion.setUpdateInterval(200);
-
-      sub = DeviceMotion.addListener(({ accelerationIncludingGravity: g }) => {
-        if (!g) return;
-        const tiltDeg = tiltDegrees(g);
-        if (tiltDeg === null) return;
-
-        // Loggar högst en gång i sekunden — annars svämmar 200ms-tickarna över konsolen.
-        const now = Date.now();
-        if (now - lastTiltLogMsRef.current > 1000) {
-          lastTiltLogMsRef.current = now;
-          console.log('LiftDetect: tilt=', tiltDeg.toFixed(1), '° (gräns', UP_MIN_TILT_DEG, '°)');
-        }
-
-        if (tiltDeg < UP_MIN_TILT_DEG) { upSinceMsRef.current = null; return; }
-        if (upSinceMsRef.current === null) { upSinceMsRef.current = now; return; }
-
-        if (now - upSinceMsRef.current >= UP_STABLE_MS) {
-          // Spärren måste läsas här inne, inte bara vid uppsättningen —
-          // lyssnaren lever kvar medan telefonen hålls upp, så utan den
-          // här skickades phone_up om på varje sensortick (var 200:e ms)
-          // och dränkte länken i skrivningar just när lådan försökte
-          // notifiera session_ended tillbaka.
-          if (phoneUpSentKeyRef.current === key) return;
-          console.log('LiftDetect: stabilt upprätt i', UP_STABLE_MS, 'ms → skickar phone_up');
-          phoneUpSentKeyRef.current = key;
-          track('phone_lifted', { phase: sessionState.phase });
-          sendPhoneUpRef.current().catch(() => {});
-        }
-      });
-    })();
-
-    return () => { cancelled = true; sub?.remove(); console.log('LiftDetect: avprenumererar (key=', key, ')'); };
-  }, [sessionState.phase, sessionState.withPod, sessionState.seq]);
+  // Här låg den globala lyft-detekteringen: en DeviceMotion-prenumeration
+  // som skickade `phone_up` till lådan när telefonen rest sig stabilt under
+  // en pågående lådsession. Den är borta med lådflödet — lådan avgör själv
+  // att telefonen lyfts (taggen försvinner, `TAG_GONE_MS` i .ino) och
+  // behöver ingen hjälp av appen. Den lådlösa pausens egen frysning vid
+  // lyft sitter kvar där den hör hemma, i app/pausing.tsx.
 
   // ── Fastnad is_pausing-flagga ─────────────────────────────────────────────
   //
@@ -470,18 +344,26 @@ function InnerLayout() {
   // den felvisade statusen i Community räcker gott.)
   //
   // Städningen fanns bara i återställningen nedan, och räckte inte på tre sätt:
-  // den krävde en checkpoint (som bara det manuella flödet skriver — lådflödet
-  // skriver ingen), den låg efter `if (duration < 5) return` så en kort krasch
+  // den krävde en checkpoint (som bara pausskärmen skriver), den låg efter
+  // `if (duration < 5) return` så en kort krasch
   // hoppade över den, och den gjorde ingenting för en flagga som fastnat utan
   // att någon session behövde återställas.
   //
   // Nollningen ligger därför här, villkorslöst och en gång per appstart: vid
-  // start pausar man inte, och det är sant oavsett hur appen dog. Pausar man
-  // faktiskt ändå — en lådsession som fortsätter medan appen startas om —
-  // monterar rutten ovan `/pausing` strax efteråt och sätter `true` igen. Att
-  // den ordningen håller är hela poängen med den delade kön i
-  // lib/pausingFlag.ts: BLE-återanslutningen tar tid, så nollningen ställer sig
-  // först i kön och `true` efter den.
+  // start pausar man inte, och det är sant oavsett hur appen dog. Alla
+  // skrivningar av flaggan går ändå genom den delade kön i
+  // lib/pausingFlag.ts, så en nollning och en paus som startas i samma
+  // andetag kan inte landa i omvänd ordning.
+  //
+  // En känd lucka, som kom med att lådans pauser numera också syns som
+  // "pausing now" (flaggan sätts då av `record_box_session_start()` i
+  // databasen, inte av appen): startar appen på samma konto medan en
+  // lådpaus pågår nollas flaggan här, och vännen slutar se pausen. I
+  // praktiken ligger telefonen i lådan under en lådpaus — att öppna appen
+  // kräver att man lyfter den, vilket avslutar pausen — så det här gäller
+  // bara en bakgrundsstart som OS:et gör av sig själv. Ska det täppas till
+  // behöver nollningen fråga servern om det finns en öppen rad i
+  // `box_session_starts`, och den tabellen har med flit inga grants.
   //
   // En känd följd, och den är avsiktlig: är samma konto inloggat på två
   // telefoner nollar en appstart på den ena flaggan som den andra satt.
@@ -741,7 +623,6 @@ function InnerLayout() {
         <Stack.Screen name="pause" options={{ headerShown: false }} />
         <Stack.Screen name="pausesummary" options={{ headerShown: false }} />
         <Stack.Screen name="pausing" options={{ headerShown: false }} />
-        <Stack.Screen name="placeinbox" options={{ headerShown: false, animation: 'none', freezeOnBlur: true }} />
         <Stack.Screen name="stats" options={{ headerShown: false }} />
         <Stack.Screen name="profile" options={{ headerShown: false }} />
         <Stack.Screen name="add-friend" options={{ headerShown: false }} />

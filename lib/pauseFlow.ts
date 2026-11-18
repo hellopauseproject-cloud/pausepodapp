@@ -10,14 +10,12 @@ import { startSleep } from './sleep';
  * **`SHOW_PAUSE_SETUP_VIEW`** avgör om PAUSE på Hem (och *I'll take a pause*
  * efter ett stödsvar) öppnar valskärmen som förut, eller startar en lådlös
  * paus direkt. Valskärmen frågade två saker: läge och intention. Läget har
- * bara ett svar så länge `POD_COMING_SOON` står på, och intentionen ställs
- * numera efteråt, i sammanfattningen och i statistiken (lib/pauseTags.ts).
- * Med `false` försvinner alltså ingenting man kan välja — bara steget.
+ * bara ett svar — appen startar aldrig en lådpaus (se app/pause.tsx) — och
+ * intentionen ställs numera efteråt, i sammanfattningen och i statistiken
+ * (lib/pauseTags.ts). Med `false` försvinner alltså ingenting man kan välja,
+ * bara steget.
  *
- * `true` är förvalet tills testerna är klara: ingen tester ska se flödet byta
- * form mitt i ett test. Valskärmen står kvar i koden, så att slå tillbaka är
- * en rad. Lådan berörs inte: dess väg går genom valskärmen och `set_mode`,
- * och den är avstängd.
+ * Valskärmen står kvar i koden, så att slå tillbaka den är en rad.
  */
 export const SHOW_PAUSE_SETUP_VIEW = false;
 

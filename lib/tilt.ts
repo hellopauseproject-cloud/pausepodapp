@@ -1,13 +1,12 @@
-// Delad mellan placeinbox.tsx (nedläggning) och _layout.tsx (lyft). Mäter
-// lutning mot tyngdkraften istället för rotation.beta/gamma — beta ensam
-// missar en telefon som står på högkant, och rotation-enheterna skiljer sig
-// mellan iOS och Android. Vinkeln mot g är oberoende av båda.
-export function tiltDegrees(g: { x: number; y: number; z: number }): number | null {
-  const mag = Math.sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
-  if (mag < 0.1) return null;
-  // 0° = helt platt (skärmen upp eller ner), 90° = står på kant.
-  return Math.acos(Math.min(1, Math.abs(g.z) / mag)) * (180 / Math.PI);
-}
+// Pausskärmens vilodetektering (app/pausing.tsx). Mäter läget mot
+// tyngdkraften istället för rotation.beta/gamma — beta ensam missar en
+// telefon som står på högkant, och rotation-enheterna skiljer sig mellan iOS
+// och Android. Projektionen på g är oberoende av båda.
+//
+// Här låg också `tiltDegrees()`, som svarade på hur snett telefonen stod i
+// grader. Den lästes av nedläggningen i placeinbox.tsx och av lyftet i
+// _layout.tsx, och båda försvann med appens lådflöde: pausskärmen frågar
+// bara om telefonen ligger nedåt eller inte.
 
 // Positivt g.z betyder skärmen nedåt — på BÅDA plattformarna, hur
 // kontraintuitivt det än ser ut för Android. iOS rapporterar CoreMotions

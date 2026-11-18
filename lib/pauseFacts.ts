@@ -24,7 +24,7 @@ export type FactSession = {
   durationSecs: number;
   /**
    * Taggen som en **nyckel**, inte som den står i raden: `intention` kan
-   * vara en etikett (`FOCUS`) eller ett id (`focus`, lådflödets kö), och
+   * vara en etikett (`FOCUS`) eller ett id (`focus`, i äldre rader), och
    * två pauser med samma tagg måste räknas ihop. Anroparen löser upp den
    * till kategorins id (stats.tsx, `factSessions`).
    */

@@ -408,9 +408,10 @@ export function takeRequestedCircleSelection(): string | null {
 
 /**
  * Räknar in en avslutad paus i cirkelns vecka och i stegen, och lägger den i
- * aktivitetsflödet. Anropas efter varje avslutad paus — både det lådlösa
- * flödet i app/pausing.tsx och lådflödets lib/sessionOutbox.ts — och no-opar
- * tyst om användaren inte är med i någon cirkel.
+ * aktivitetsflödet. Anropas efter varje avslutad paus i appen
+ * (app/pausing.tsx) och no-opar tyst om användaren inte är med i någon
+ * cirkel. Lådans pauser går inte genom appen: `record_box_session()` på
+ * servern anropar `record_circle_pause` själv.
  *
  * Skickar bara sessionens id: RPC:n läser längd och sluttid ur pause_sessions
  * själv, så ingen kan skriva in timmar som inte finns i den egna loggen.
@@ -439,10 +440,10 @@ export async function recordPauseInCircle(sessionId: string, category?: string |
   // som lägger pausen där. Byter man ordning missar notisen just den paus som
   // tog användaren över strecket.
   //
-  // Här och inte i de två pausflödena ([app/pausing.tsx](app/pausing.tsx) och
-  // [lib/sessionOutbox.ts](lib/sessionOutbox.ts)) av samma skäl som den här
-  // funktionen finns: två anrop hade kunnat glida isär, och det ena flödet
-  // hade tappat notisen utan att något felar.
+  // Här och inte i pausskärmen av samma skäl som den här funktionen finns:
+  // varje väg in i kretsen ska gå genom ett enda ställe, så att en ny väg
+  // inte kan tappa notisen utan att något felar. Lådans pauser når den
+  // genom `record_box_session()` på servern.
   //
   // Ett eget anrop och inte en gren inne i `record_circle_pause` — skälet
   // står i supabase/circle_goal_notify.sql: en ny parameter där hade krävt
