@@ -163,6 +163,17 @@ function SettingsScreen() {
             <Text style={styles.podHowText}>How it works ›</Text>
           </TouchableOpacity>
         </View>
+        {/* Lådans nätverksläge (app/pod-network.tsx). Egen rad och inte en
+            andra länk i titelraden: två chevroner bredvid varandra läses som
+            samma sak, och den här handlar om just den här lådan här och nu. */}
+        <TouchableOpacity
+          style={styles.podNet}
+          onPress={() => router.push('/pod-network' as never)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+        >
+          <Text style={styles.podHowText}>Pod and Wi-Fi ›</Text>
+        </TouchableOpacity>
         <Text style={styles.sectionSubtitle}>
           {myTags && myTags.length > 0
             ? 'Your PausePod knows you by these tags.'
@@ -259,6 +270,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   podTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   podTitle: { marginBottom: 0 },
   podHow: { marginLeft: 'auto' },
+  podNet: { alignSelf: 'flex-start', paddingVertical: 6 },
   podHowText: { fontSize: 14, fontWeight: '600', color: Palette.hue },
   sectionSubtitle: {
     fontSize: 14,

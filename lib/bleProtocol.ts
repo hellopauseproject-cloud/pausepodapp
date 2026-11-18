@@ -6,6 +6,9 @@ import type { SessionPhase, Side } from './sessionMachine';
 
 export type BoxMessage =
   | { type: 'hello'; boxId: string }
+  | { type: 'boxid'; serverBoxId: string }
+  | { type: 'ready_to_close' }
+  | { type: 'net'; wifiUp: boolean; networkSaved: boolean; queued: number; ssid: string }
   | { type: 'state'; phase: SessionPhase; elapsedMs: number; seq: string }
   | { type: 'touch_begin'; side: Side }
   | { type: 'touch_end'; side: Side }
@@ -36,6 +39,32 @@ export function parseBoxMessage(raw: string): BoxMessage | null {
     case 'hello': {
       const boxId = rest.join(':');
       return boxId ? { type: 'hello', boxId } : null;
+    }
+    // Lådans serverkända id (firmware v8.4+), t.ex. BOX001. Det är INTE
+    // samma sak som `hello`, som bär chip-id:t. Utan det hamnar samma
+    // fysiska låda i databasen under två olika id beroende på om det var
+    // lådan eller appen som skrev raden.
+    case 'boxid': {
+      const serverBoxId = rest.join(':');
+      return serverBoxId ? { type: 'boxid', serverBoxId } : null;
+    }
+    // En känd tagg ligger i lådan med locket öppet: pausen har inte börjat
+    // än. Lådan startar den när locket stängs (firmware v8.5+).
+    case 'ready_to_close':
+      return { type: 'ready_to_close' };
+    // Lådans nätverksläge (firmware v8.5+). Nätets namn ligger SIST och kan
+    // innehålla kolon, så allt efter tredje fältet är namnet.
+    case 'net': {
+      const [upRaw, savedRaw, queuedRaw, ...ssidParts] = rest;
+      const queued = Number(queuedRaw);
+      if (upRaw === undefined || savedRaw === undefined || !Number.isFinite(queued)) return null;
+      return {
+        type: 'net',
+        wifiUp: upRaw === '1',
+        networkSaved: savedRaw === '1',
+        queued,
+        ssid: ssidParts.join(':'),
+      };
     }
     case 'state': {
       const [phase, elapsedMsRaw, seq] = rest;

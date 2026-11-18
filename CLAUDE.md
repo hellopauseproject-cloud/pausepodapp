@@ -992,6 +992,9 @@ Gäller bara appens pauser. Under en NFC-paus säger lådan `idle` och inget mer
 | Meddelande | Betydelse |
 |---|---|
 | `hello:<box_id>` | Vid anslutning. `box_id` är chip-id:t, inte WiFi-identiteten `BOX_ID`. |
+| `boxid:<BOX_ID>` | **v8.4+.** Lådans serverkända id (`BOX001`), direkt efter `hello`. Utan det hamnar samma fysiska låda i databasen under två olika id beroende på om det var lådan eller appen som skrev raden — appens `box_seq` var `62` och lådans `BOX001:62`, så dedupen på `(user_id, box_seq)` kunde inte se att det var samma paus. Eget meddelande och inte ett fält till i `hello`, eftersom parsern lägger ihop allt efter `hello:` till ett id. |
+| `ready_to_close` | **v8.5+.** En känd tagg ligger i lådan med locket öppet, alltså pausen har **inte** börjat än (den startar när locket stängs). Appen kan visa *CLOSE THE POD TO START*. |
+| `net:<uppe>:<sparat>:<i kön>:<nätnamn>` | **v8.5+.** Lådans nätverksläge, vid anslutning och när det ändras. `uppe`/`sparat` är `0`/`1`, `i kön` är antalet pauser som väntar på servern. **Nätnamnet ligger sist och kan innehålla kolon** — allt efter tredje fältet är namnet, samma regel som `hello`. Bärs av [app/pod-network.tsx](app/pod-network.tsx). |
 | `state:<fas>:<elapsedMs>:<seq>` | Nuläge. Fas: `idle`, `checked_in`, `awaiting_lid`, `active`, `respite` (allt annat → `idle`, `showing_time` → `active`; en NFC-paus → `idle:0:0`). `checking_in` finns inte längre. |
 | `battery:<0-100>` | Vid anslutning, sedan var 5:e minut |
 | `checkin_complete` | Locket stängdes under `AWAITING_LID` (förr: tummarna höll färdigt) |
@@ -1047,6 +1050,26 @@ Status i appen: alla fyra är implementerade. Se
   [lib/sessionMachine.ts](lib/sessionMachine.ts) har kvar en gren för det.
 - **`MIN_SESSION_MS = 5000`** är ett testvärde (sätt `60000` innan skarp
   drift). Kortare pauser kastas helt, båda vägarna.
+
+**v8.5 tog bort appens lådflöde i firmwaren.** Lådan har inte längre
+`AWAITING_LID`, `set_mode`, `phone_down`, `phone_up`, `session_ack`,
+`session_started`, `session_ended`, `checkin_complete` eller sin
+Bluetooth-kö. En paus är antingen en app-paus (helt i telefonen) eller en
+lådpaus (taggen, locket, WiFi) — aldrig båda, och appen startar aldrig en
+lådpaus. `state` säger fortfarande alltid `idle`, med flit: en app som tror
+att pausen är dess egen skulle fastna på pausskärmen i väntan på ett
+`session_ended` som inte finns.
+
+**Appsidan är därför dödkod och ska röjas** — `app/placeinbox.tsx`,
+`lib/sessionOutbox.ts`, lådgrenen i `app/pause.tsx`, låddelen av
+`context/SessionContext.tsx` och `lib/sessionMachine.ts`, lyft-detekteringen
+i `app/_layout.tsx`, och sändarna i `context/BLEContext.tsx`. Ingenting av
+det går att nå i dag (`POD_COMING_SOON`), så det brådskar inte, men det ska
+bort och inte lämnas liggande. `app/pausing.tsx` är den **lådlösa** pausen
+och ska stå kvar.
+
+Protokollet och reglerna för pausposter bor i
+[firmware/pausepod_firmware_v8/PAUSPOST_KONTRAKT.md](firmware/pausepod_firmware_v8/PAUSPOST_KONTRAKT.md).
 
 ## App-arkitektur, kort
 
