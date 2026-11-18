@@ -37,6 +37,11 @@
 // NYTT: BLE-meddelandet "ready_to_close" när en känd tagg ligger i lådan med
 // locket öppet — appen kan då visa CLOSE THE POD TO START.
 //
+// NYTT: seriekommandot "glom" glömmer de sparade näten, så att lådan går
+// tillbaka till NO WIFI och inställningssidan kan provas om. Se
+// handleSerialCommand() längst ner för varför det INTE är samma sak som att
+// radera flashminnet.
+//
 // SessionRecord och de oanvända faserna i pausepod_types.h är kvar och kan
 // städas separat.
 //
@@ -52,30 +57,31 @@
 //
 // ── Från v8 ──
 //
-// TVÅ SÄTT ATT STARTA EN PAUS
+// SÅ STARTAS EN LÅDPAUS
 //
-// 1. Lådan själv (NFC). Telefonen med sin registrerade Pause-tagg läggs i
-//    lådan → displayen säger HI, <NAMN> → locket stängs → pausen startar
-//    (bocken → märket). Ingen app behövs.
+//    Telefonen med sin registrerade Pause-tagg läggs i lådan → displayen
+//    säger HI, <NAMN> → locket stängs → pausen startar (bocken → märket).
+//    Ingen app behövs.
 //    Okänd tagg → QR-koden för registrering, som i pause_pod_nfc.
 //    Pausen sparas av lådan själv via WiFi (edge-funktionen box-session),
 //    också när appen är stängd.
 //
-// 2. Appen (Bluetooth), som i v7. set_mode → PLACE PHONE IN BOX → phone_down
-//    → CLOSE BOX → locket stängs → pausen startar. Utan tummar skickas
-//    checkin_complete och session_started i samma stund som locket stängs.
-//    Pausen går till appen via Bluetooth som förut (session_ended + ack).
+//    Här stod ett andra sätt: appen över Bluetooth, set_mode → PLACE PHONE
+//    IN BOX → phone_down → locket stängs. Det togs bort i v8.5, både här och
+//    i appen (se högst upp). Lådan startar bara NFC-pausen; en app-paus sker
+//    helt i telefonen, och lådan får aldrig veta om den.
 //
 // UT
 //
 //    Locket öppnas → klockan fryser, ON HOLD, ringen krymper i 30 s.
 //    Stängs locket igen fortsätter pausen.
-//    NFC-paus: taggen borta (telefonen lyft) → pausen klar, completed=1.
-//    App-paus: appens phone_up → pausen klar, completed=1 (som v7).
+//    Taggen borta (telefonen lyft) → pausen klar, completed=1.
 //    Rinner fristen ut avslutas den ändå, completed=0.
 //
-// Varje paus går bara EN väg: en NFC-paus skickas aldrig över Bluetooth
-// (då hade appen sparat den en gång till), och en app-paus aldrig över WiFi.
+// Pausen går bara EN väg: över WiFi, till box-session. Appen får inte veta
+// att den pågår — `state` säger alltid idle — för en app som trodde att
+// pausen var dess egen skulle fastna i väntan på ett session_ended som
+// inte kommer.
 //
 // ÄNDRAT MOT v7:
 //  - Tumplattorna, STATS-sidorna och SHOWING_TIME är borta. Pinnarna 2 och 3
@@ -2526,7 +2532,7 @@ void diagPrint() {
     }
     Serial.println();
   }
-  Serial.println("Skriv \"logg\" för att visa igen, \"rensa\" för att tömma.");
+  Serial.println("Skriv \"logg\" för att visa igen, \"rensa\" för att tömma,\n\"glom\" för att glömma sparade nät.");
   Serial.println("══════════════════════════════════════════");
   Serial.println();
 }
@@ -2544,6 +2550,24 @@ void handleSerialCommand() {
         prefs.putInt("dg_head", 0);
         prefs.putInt("dg_count", 0);
         Serial.println("Sömnloggen tömd");
+      }
+      // Glömmer de fem sparade näten, så att lådan står på NO WIFI igen och
+      // inställningssidan går att prova om. Finns ett nät i secrets.h läggs
+      // det ändå alltid till som kandidat — då hjälper inte det här.
+      //
+      // Tömmer BARA namnrymden "wifi". Allt annat (next_seq, box_id,
+      // checkpointen, sömnloggen) bor i "pausepod" och rörs inte, och det är
+      // hela skälet att kommandot finns: raderar man i stället hela
+      // flashminnet (Erase All Flash Before Sketch Upload) börjar next_seq om
+      // på 1, och servern dedupar på (box_id, seq) — varje ny paus krockar
+      // med en redan sparad och kastas tyst, utan att något felar.
+      else if (strcmp(buf, "glom") == 0) {
+        wifiPrefs.begin("wifi", false);
+        wifiPrefs.clear();
+        wifiPrefs.end();
+        Serial.println("Sparade nät glömda — startar om");
+        delay(200);
+        ESP.restart();
       }
       len = 0;
     } else if (len < (int)sizeof(buf) - 1) {
