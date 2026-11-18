@@ -1,11 +1,62 @@
-// Pause Pod — firmware v8
-// v7 + NFC-taggen + WiFi. Tumplattorna är borta.
+// Pause Pod — firmware v8.5 (sparad som pausepod_firmware_v8.ino; originalet ligger i pausepod_firmware_v8.ino.bak)
+// v8 med mjukare skärm. Allt annat är som i v8.
+//
+// EN LÄSARE, SDA PÅ GPIO 17. Försöket med två läsare är borta; den koden
+// ligger kvar i pausepod_firmware_v8_3_tva_lasare.ino.bak.
+//
+// NYTT I v8.4:
+//  - Startceremonin är kortare: bocken → märket. CLOCK ON.-texten och
+//    uppräkningen 00:01–00:03 är BORTTAGNA, och med dem konstanterna
+//    STARTED_TEXT_MS, COUNT_SECONDS, COUNT_FADE_MS, CER_TEXT_END,
+//    CER_COUNT_END och CER_FADE_END.
+//  - Kritiskt batteri: texten LOW BATTERY är BORTTAGEN. Batterisymbolen
+//    blir röd i stället (C_RED).
+//  - NO WIFI / SET UP WIFI: två rader i fyra sekunder när lådan vaknar, men
+//    bara när tre eller fler pauser ligger oskickade. Se renderNeedsWifi().
+//  - BLE-meddelandet "net:<uppe>:<sparat>:<i kön>:<nätnamn>" för appens
+//    nätverksstatus-sida. Skickas vid anslutning och när läget ändras.
+//  - Startnotis till servern när en NFC-paus börjar (box-session med
+//    event: "start"). Se doStartNotice() och PAUSPOST_KONTRAKT.md.
+//  - Nytt BLE-meddelande "boxid:<BOX_ID>" i handskakningen, så att appen kan
+//    bygga samma box_seq som lådan. Appar som inte känner igen det struntar
+//    i det.
+//
+// NYTT I v8.5 — APPEN STARTAR INTE LÄNGRE EN LÅDPAUS.
+// En paus är antingen en app-paus (helt i telefonen, lådan vet ingenting) eller
+// en lådpaus (telefonen ner, taggen läses, locket stängs). Lådan gör bara det
+// senare, och pausen går bara via WiFi.
+//
+// BORTTAGET: enum Owner och sessionOwner, fasen AWAITING_LID och
+// renderAwaitingLid(), phonePlaced, PHONE_WAIT_MAX_MS, AWAIT_LID_MAX_MS,
+// BLE-meddelandena set_mode / phone_down / phone_up / session_ack /
+// session_started / session_ended / checkin_complete, hela Bluetooth-kön
+// (SessionRecord-kön queueBuf, QUEUE_SIZE, queuePush, queueRemoveSeq,
+// q_count/q_data i NVS), backlogen (sendNextBacklog, ACK_TIMEOUT_MS,
+// BACKLOG_START_MS) och cp_owner i kontrollpunkten.
+//
+// NYTT: BLE-meddelandet "ready_to_close" när en känd tagg ligger i lådan med
+// locket öppet — appen kan då visa CLOSE THE POD TO START.
+//
+// SessionRecord och de oanvända faserna i pausepod_types.h är kvar och kan
+// städas separat.
+//
+// ÄNDRAT MOT v8:
+//  - Skärmen tonas upp när lådan vaknar (locket öppnas, eller skärmvilan tar
+//    slut) i stället för att blinka till. Bilden ritas medan ljuset är släckt.
+//  - Skärmen tonas ut innan den somnar: djupsömn, skärmvila och pausdvala
+//    (där den tonas ner till det svaga paustecknet).
+//  - Uppräkningen 00:01–00:03 i startceremonin står still: varje siffra syns
+//    direkt, utan in- och uttoning.
+//  - SCANNED ✓ mellan QR-koden och HI, NAMN: när någon öppnat parkopplings-
+//    länken (servern svarar "scanned": true) men inte bekräftat än.
+//
+// ── Från v8 ──
 //
 // TVÅ SÄTT ATT STARTA EN PAUS
 //
 // 1. Lådan själv (NFC). Telefonen med sin registrerade Pause-tagg läggs i
 //    lådan → displayen säger HI, <NAMN> → locket stängs → pausen startar
-//    (bocken → CLOCK ON. → 00:01–00:05 → märket). Ingen app behövs.
+//    (bocken → märket). Ingen app behövs.
 //    Okänd tagg → QR-koden för registrering, som i pause_pod_nfc.
 //    Pausen sparas av lådan själv via WiFi (edge-funktionen box-session),
 //    också när appen är stängd.
@@ -29,7 +80,7 @@
 // ÄNDRAT MOT v7:
 //  - Tumplattorna, STATS-sidorna och SHOWING_TIME är borta. Pinnarna 2 och 3
 //    är lediga.
-//  - RC522-läsaren på SPI (SDA 10, SCK 12, MOSI 11, MISO 13, RST 16).
+//  - RC522-läsaren på SPI (SDA 17, SCK 12, MOSI 11, MISO 13, RST 16).
 //    RST låg på GPIO 1 i NFC-testet — där sitter magnetsensorn. FLYTTA RST
 //    till GPIO 16 (eller koppla den till 3.3V och sätt RC522_RST_PIN till
 //    UINT8_MAX nedan).
@@ -68,7 +119,6 @@
 // som inte finns än ger "does not name a type".
 
 // Vem äger pausen
-enum Owner : uint8_t { OWNER_NONE = 0, OWNER_APP = 1, OWNER_TAG = 2 };
 
 // WiFi-kön: NFC-pauser som väntar på servern. Egen struct — SessionRecord i
 // pausepod_types.h lagras redan i NVS och dess layout får inte ändras.
@@ -89,7 +139,7 @@ enum TagInfo : uint8_t { TI_NONE, TI_PENDING, TI_KNOWN, TI_UNKNOWN, TI_OFFLINE }
 #define POWER_PIN        15
 #define BATTERY_ADC_PIN  4
 
-#define RC522_SS_PIN     10
+#define RC522_SS_PIN     17
 #define RC522_SCK_PIN    12
 #define RC522_MOSI_PIN   11
 #define RC522_MISO_PIN   13
@@ -102,34 +152,23 @@ const char* PAIR_URL_FALLBACK = "https://joinpausepod.com/pair";
 
 // ─── Beteendekonstanter ─────────────────────────────────────
 
-const unsigned long PHONE_WAIT_MAX_MS   = 20000;  // appen tyst så länge → visa CLOSE BOX ändå
-const unsigned long AWAIT_LID_MAX_MS    = 90000;  // ingen stänger locket → tillbaka till loggan
-
 // Startceremonin, segment för segment
 const unsigned long CHECK_DRAW_MS       = 400;
 const unsigned long CHECK_HOLD_MS       = 400;
 const unsigned long CHECK_FADE_MS       = 200;
-const unsigned long STARTED_TEXT_MS     = 900;
-const int           COUNT_SECONDS       = 5;
-const unsigned long COUNT_FADE_MS       = 700;
 const unsigned long LOGO_FADE_MS        = 1000;
 
+// Bocken ritas och tonas ut, sedan tonar märket in. Inget däremellan.
 const unsigned long CER_CHECK_END = CHECK_DRAW_MS + CHECK_HOLD_MS;
-const unsigned long CER_TEXT_END  = CER_CHECK_END + STARTED_TEXT_MS;
-const unsigned long CER_COUNT_END = CER_TEXT_END + COUNT_SECONDS * 1000UL;
-const unsigned long CER_FADE_END  = CER_COUNT_END + COUNT_FADE_MS;
-const unsigned long CER_END       = CER_FADE_END + LOGO_FADE_MS;
+const unsigned long CER_END       = CER_CHECK_END + LOGO_FADE_MS;
 const unsigned long RESPITE_MS          = 30000;
 const unsigned long MIN_SESSION_MS      = 5000;   // TESTVÄRDE — sätt 60000 innan skarp drift
 const unsigned long ENDED_SHOW_MS       = 5000;
 const unsigned long CHECKPOINT_MS       = 600000;
-const unsigned long ACK_TIMEOUT_MS      = 3000;
 const unsigned long BATTERY_REPORT_MS   = 300000;
-const unsigned long BACKLOG_START_MS    = 800;
 const unsigned long HANDSHAKE_DELAY_MS  = 600;
 const unsigned long HEAP_LOG_MS         = 30000;
 const unsigned long DEBOUNCE_MS         = 40;
-const int           QUEUE_SIZE          = 50;
 
 // NFC
 const unsigned long TAG_POLL_MS         = 150;    // hur ofta läsaren frågas
@@ -147,7 +186,6 @@ void playEndTone()     { /* TODO: MAX98357A */ }
 
 // ─── Vem äger pausen ────────────────────────────────────────
 
-Owner sessionOwner = OWNER_NONE;
 char  sessionTagUid[21] = "";
 
 // ─── Beständig lagring ──────────────────────────────────────
@@ -155,8 +193,6 @@ char  sessionTagUid[21] = "";
 Preferences prefs;
 
 // Bluetooth-kön, som v7: app-pauser som väntar på appens ack.
-SessionRecord queueBuf[QUEUE_SIZE];
-int      queueCount = 0;
 uint32_t nextSeq    = 1;
 String   boxIdBle   = "";   // v7:s chip-id, det appen känner lådan som över Bluetooth
 
@@ -186,11 +222,6 @@ void loadPersisted() {
   statLatestMs  = prefs.getUInt("latest_ms", 0);
   statCount     = prefs.getUInt("count", 0);
 
-  queueCount = prefs.getInt("q_count", 0);
-  if (queueCount > QUEUE_SIZE || queueCount < 0) queueCount = 0;
-  if (queueCount > 0) {
-    prefs.getBytes("q_data", queueBuf, sizeof(SessionRecord) * queueCount);
-  }
 
   wifiQueueCount = prefs.getInt("wq_count", 0);
   if (wifiQueueCount > WIFI_QUEUE_SIZE || wifiQueueCount < 0) wifiQueueCount = 0;
@@ -202,8 +233,6 @@ void loadPersisted() {
 }
 
 void saveQueue() {
-  prefs.putInt("q_count", queueCount);
-  if (queueCount > 0) prefs.putBytes("q_data", queueBuf, sizeof(SessionRecord) * queueCount);
 }
 
 void saveWifiQueue() {
@@ -218,24 +247,7 @@ void saveStats() {
   prefs.putUInt("count", statCount);
 }
 
-void queuePush(SessionRecord r) {
-  if (queueCount >= QUEUE_SIZE) {
-    for (int i = 1; i < QUEUE_SIZE; i++) queueBuf[i - 1] = queueBuf[i];
-    queueCount = QUEUE_SIZE - 1;
-  }
-  queueBuf[queueCount++] = r;
-  saveQueue();
-}
 
-void queueRemoveSeq(uint32_t seq) {
-  int w = 0;
-  for (int i = 0; i < queueCount; i++) {
-    if (queueBuf[i].seq != seq) queueBuf[w++] = queueBuf[i];
-  }
-  if (w == queueCount) return;
-  queueCount = w;
-  saveQueue();
-}
 
 void wifiQueuePush(const WifiRecord& r) {
   if (wifiQueueCount >= WIFI_QUEUE_SIZE) {
@@ -264,19 +276,16 @@ bool lastDeviceConnected = false;
 
 static portMUX_TYPE bleValueMux = portMUX_INITIALIZER_UNLOCKED;
 
-bool          backlogSending    = false;
-uint32_t      backlogAwaitSeq   = 0;
-unsigned long backlogSentAt     = 0;
-unsigned long backlogStartAt    = 0;
 unsigned long handshakeAt       = 0;
 unsigned long lastBatteryReport = 0;
 
-volatile uint32_t pendingAckSeq = 0;
-volatile bool     pendingPhoneDown = false;
-volatile bool     pendingSetMode   = false;
-volatile bool     pendingPhoneUp   = false;
+// Nätverksläget som appen senast fick, så att det bara skickas när det
+// ändras. -1 = inget skickat än.
+int           lastNetUp      = -1;
+int           lastNetSaved   = -1;
+int           lastNetQueued  = -1;
 
-bool phonePlaced = false;
+
 
 void sendBLE(const char* fmt, ...) {
   if (!deviceConnected) return;
@@ -299,16 +308,13 @@ Phase phase = IDLE;
 // Det appen får veta om lådans fas. En NFC-paus rapporteras som idle: appen
 // äger den inte, och ett "active" hade fått appen att hoppa in i sin
 // pausskärm (RESTORE vid återanslutning) för en paus den inte ska spara.
+// Lådan säger "idle" till appen också under en paus. Skälet är inte att den
+// är sysslolös, utan att en app som tror att pausen är dess egen skulle fastna
+// på pausskärmen och vänta på ett session_ended som inte längre finns.
+// TODO: rapportera den riktiga fasen när appen är uppdaterad.
 const char* phaseName(Phase p) {
-  if (sessionOwner == OWNER_TAG) return "idle";
-  switch (p) {
-    case CHECKED_IN:   return "checked_in";
-    case AWAITING_LID: return "awaiting_lid";
-    case ACTIVE:       return "active";
-    case SHOWING_TIME: return "active";
-    case RESPITE:      return "respite";
-    default:           return "idle";
-  }
+  (void)p;
+  return "idle";
 }
 
 unsigned long phaseStartMs = 0;
@@ -436,6 +442,13 @@ unsigned long pairedShownAt   = 0;   // >0 = visa bekräftelsen
 char          pairedName[33]  = "";
 char    pairCode[11] = "";
 char    pairUrl[96] = "";
+// Någon har öppnat länken och appen har kollat koden: personen ser "Tag
+// found. Is it yours?" i telefonen men har inte bekräftat än. Gäller bara
+// den kvarstående QR-koden (telefonen lyft) — den som skannar är ju samma
+// telefon som låg i lådan.
+const unsigned long SCANNED_CHECK_MS = 400;   // bocken ritas in
+bool          pairScanned   = false;
+unsigned long pairScannedAt = 0;
 unsigned long lastLookupMs = 0;
 bool    startWhenKnown = false;   // locket stängdes medan svaret var på väg
 
@@ -457,6 +470,7 @@ char  lookupStatus[12] = "";
 char  lookupName[33] = "";
 char  lookupCode[11] = "";
 char  lookupUrl[96]  = "";
+bool  lookupScanned  = false;   // "scanned" i svaret (saknas = false: äldre server)
 
 // Uppladdning av en NFC-paus (box-session)
 volatile bool uploadRequested = false;
@@ -466,6 +480,14 @@ unsigned long uploadAgoMs     = 0;
 int           uploadResult    = 0;   // 1 = klar (ta bort ur kön), 0 = försök igen
 unsigned long lastUploadTryMs = 0;
 bool          uploadBusy      = false;
+
+// Startnotis (box-session, event: "start"). Skickas när en NFC-paus börjar,
+// så att servern vet NÄR den började också om lådan dör mitt i pausen. Se
+// PAUSPOST_KONTRAKT.md. Skicka och släpp: lyckas den inte läggs den inte i
+// någon kö, för servern räknar då ut starttiden baklänges ur slutposten.
+volatile bool startNoticeRequested = false;
+uint32_t      startNoticeSeq       = 0;
+char          startNoticeTag[21]   = "";
 
 volatile bool wifiUp = false;
 
@@ -914,7 +936,9 @@ void doLookup() {
     strncpy(lookupName,   doc["username"] | "", sizeof(lookupName) - 1);
     strncpy(lookupCode,   doc["code"] | "", sizeof(lookupCode) - 1);
     strncpy(lookupUrl,    doc["url"] | "", sizeof(lookupUrl) - 1);
+    lookupScanned = doc["scanned"] | false;
   } else {
+    lookupScanned = false;
     Serial.printf("box-tag svarade %d: %s\n", code, response.c_str());
   }
   // Loopen kan ha frågat om en annan tagg medan anropet pågick, så svaret
@@ -952,6 +976,25 @@ void doUpload() {
   xSemaphoreGive(netMutex);
 }
 
+void doStartNotice() {
+  uint32_t seq;
+  char     tag[21];
+  xSemaphoreTake(netMutex, portMAX_DELAY);
+  seq = startNoticeSeq;
+  strncpy(tag, startNoticeTag, sizeof(tag));
+  xSemaphoreGive(netMutex);
+
+  char body[160];
+  snprintf(body, sizeof(body),
+           "{\"event\":\"start\",\"tag_uid\":\"%s\",\"seq\":%lu,\"started_by\":\"tag\"}",
+           tag, (unsigned long)seq);
+
+  String response;
+  int code = postToFunction("box-session", String(body), response);
+  Serial.printf("box-session seq %lu start → %d %s\n",
+                (unsigned long)seq, code, response.c_str());
+}
+
 void netTask(void*) {
   if (!ensureWifi()) wifiNeedsSetup = true;
   unsigned long lastWifiTry = millis();
@@ -960,6 +1003,9 @@ void netTask(void*) {
       lookupRequested = false;
       doLookup();
       lookupDone = true;
+    } else if (startNoticeRequested) {
+      startNoticeRequested = false;
+      doStartNotice();
     } else if (uploadRequested) {
       uploadRequested = false;
       doUpload();
@@ -1031,8 +1077,9 @@ const Rgb C_ACCENT = {0x2e, 0x86, 0xde};  // app-accent: pausmärket
 const Rgb C_INK    = {0xff, 0xf4, 0xec};  // gräddvitt bläck, rgba(255,244,236,a)
 const Rgb C_HONEY  = {0xf0, 0xb9, 0x78};  // honey: den varma vändningen
 const Rgb C_GREEN  = {0x3c, 0xc8, 0x78};  // lådans GREEN: bara bocken
+const Rgb C_RED    = {0xe8, 0x5c, 0x4f};  // bara batterisymbolen under 10 %
 
-uint16_t BG, SURF, LINE, HUE, ACCENT, INK, INK_2, INK_3, HONEY, GREEN;
+uint16_t BG, SURF, LINE, HUE, ACCENT, INK, INK_2, INK_3, HONEY, GREEN, RED;
 
 uint16_t col(Rgb c) { return tft.color565(c.r, c.g, c.b); }
 
@@ -1059,6 +1106,7 @@ void initColors() {
   INK_3  = mix(C_BG, C_INK, 0.50);   // tredje nivån, aldrig under 0.5
   HONEY  = col(C_HONEY);
   GREEN  = col(C_GREEN);
+  RED    = col(C_RED);
 }
 
 const int SCREEN_W = 320;
@@ -1239,7 +1287,7 @@ int batteryPercent() {
 // Batterinivån som skärmen visar. Läses var 20:e sekund och medelvärdesbildas,
 // så att symbolen inte blinkar fram och tillbaka vid 20 %.
 const int BATTERY_LOW_PCT      = 20;   // symbolen syns
-const int BATTERY_CRITICAL_PCT = 10;   // + texten LOW BATTERY
+const int BATTERY_CRITICAL_PCT = 10;   // symbolen blir röd
 int shownBatteryPct = 100;
 unsigned long lastBatteryReadMs = 0;
 
@@ -1252,21 +1300,16 @@ void updateShownBattery() {
 }
 
 // En liten batterisymbol uppe till höger, bara när batteriet börjar ta slut.
-// Honung, designsystemets varma "observera": ingen röd larmfärg, lådan ska
-// inte skrika. Under 10 % får den en rad text bredvid sig.
+// Honung under 20 %, designsystemets varma "observera". Under 10 % blir hela
+// symbolen röd — ingen text, lådan säger det med färgen i stället.
 void drawBatteryWarning() {
   if (shownBatteryPct > BATTERY_LOW_PCT) return;
+  uint16_t c = (shownBatteryPct <= BATTERY_CRITICAL_PCT) ? RED : HONEY;
   const int w = 22, h = 11, x = SCREEN_W - 14 - w, y = 12;
-  sprite.drawRoundRect(x, y, w, h, 3, HONEY);
-  sprite.fillRoundRect(x + w, y + 3, 3, 5, 1, HONEY);   // knoppen
+  sprite.drawRoundRect(x, y, w, h, 3, c);
+  sprite.fillRoundRect(x + w, y + 3, 3, 5, 1, c);   // knoppen
   int fill = max(2, (int)((w - 4) * shownBatteryPct / 100.0 + 0.5));
-  sprite.fillRect(x + 2, y + 2, fill, h - 4, HONEY);
-  if (shownBatteryPct <= BATTERY_CRITICAL_PCT) {
-    sprite.setTextDatum(MR_DATUM);
-    sprite.setFreeFont(&FreeSansBold9pt7b);
-    sprite.setTextColor(HONEY);
-    sprite.drawString("LOW BATTERY", x - 8, y + h / 2);
-  }
+  sprite.fillRect(x + 2, y + 2, fill, h - 4, c);
 }
 
 // Alla skärmar lämnas till displayen härigenom, så att batterisymbolen
@@ -1451,6 +1494,70 @@ void renderPaired() {
   pushFrame();
 }
 
+// QR-koden skannad, inte bekräftad än. Samma upplägg som HI, NAMN, så att
+// skärmarna läses som steg i rad: ringen står still, bocken ritas in.
+// ─── "Lådan når inte servern" ────────────────────────────
+//
+// Pauser som väntar är normalt och ska inte sägas. Men ligger tre eller fler
+// oskickade har ingen uppladdning lyckats på tre pauser, och då är något fel
+// som bara användaren kan åtgärda. Villkoret räknar pauser i stället för tid,
+// eftersom lådan inte har någon klocka och millis() nollställs vid omstart.
+//
+// Meddelandet visas i fyra sekunder när lådan vaknar, sedan den vanliga
+// loggan. Aldrig mitt i en paus, och aldrig permanent: en tillsägelse varje
+// gång locket öppnas hör inte hemma i den här produkten.
+//
+// TODO (steg 4, när appens wifi-skärm finns): byt texten mot en QR-kod som
+// djuplänkar till wifi-inställningen för just den här lådan. Lådan ritar
+// redan QR-koder i registreringsflödet, så det är samma kod med annan länk.
+const unsigned long WIFI_NOTICE_MS        = 4000;
+const int           WIFI_NOTICE_MIN_QUEUE = 3;
+bool          wifiNoticeActive  = false;
+unsigned long wifiNoticeStartMs = 0;
+
+void maybeShowWifiNotice() {
+  if (wifiQueueCount < WIFI_NOTICE_MIN_QUEUE) return;
+  wifiNoticeActive  = true;
+  wifiNoticeStartMs = millis();
+}
+
+bool wifiNoticeDue() {
+  if (!wifiNoticeActive) return false;
+  if (millis() - wifiNoticeStartMs >= WIFI_NOTICE_MS ||
+      wifiQueueCount < WIFI_NOTICE_MIN_QUEUE) {
+    wifiNoticeActive = false;
+    return false;
+  }
+  return true;
+}
+
+// Två rader: vad som är fel och vad man ska göra. Ingen siffra — kön är
+// lådans ensak, och appen är den som förklarar varför det inte går.
+// Honung, aldrig rött: rött är batterisymbolen under 10 %.
+void renderNeedsWifi() {
+  sprite.fillSprite(BG);
+  sprite.setTextDatum(MC_DATUM);
+  bool everSetUp = wifiSavedCount > 0;
+  String h = everSetUp ? "NO WIFI" : "SET UP WIFI";
+  fitHeadline(h, SCREEN_W - 32);
+  drawHeavy(h, CENTER_X, 70, HONEY);
+  drawBody(everSetUp ? "Open the app to reconnect." : "Open the app to connect.",
+           CENTER_X, 110, INK_2);
+  pushFrame();
+}
+
+void renderScanned(float progress) {
+  sprite.fillSprite(BG);
+  drawRing(CENTER_X, 46, 22, 5, GREEN);
+  drawCheck(CENTER_X, 46, 22, 6, progress, GREEN);
+  sprite.setTextDatum(MC_DATUM);
+  String h = "SCANNED";
+  fitHeadline(h, SCREEN_W - 32);
+  drawHeavy(h, CENTER_X, 100, INK);
+  drawBody("Confirm on your phone.", CENTER_X, 140, INK_2);
+  pushFrame();
+}
+
 // Inställningen gick igenom.
 void renderWifiOk() {
   sprite.fillSprite(BG);
@@ -1481,6 +1588,19 @@ void renderIdle() {
     if (pairedShownAt != 0) { lastDrawnQr[0] = 0; renderPaired(); return; }
     if (pairHold && pairCode[0]) {
       char key[24];
+      if (pairScanned) {
+        unsigned long since = millis() - pairScannedAt;
+        if (since < SCANNED_CHECK_MS) {
+          // Bocken ritas in: rita om varje bildruta tills den är klar.
+          lastDrawnQr[0] = 0;
+          renderScanned(since / (float)SCANNED_CHECK_MS);
+        } else {
+          // Sedan en stillbild, ritad en gång.
+          snprintf(key, sizeof(key), "scanned:%s", pairCode);
+          if (qrNeedsDraw(key)) renderScanned(1.0);
+        }
+        return;
+      }
       snprintf(key, sizeof(key), "pair:%s", pairCode);   // samma nyckel: ingen omritning vid lyftet
       if (qrNeedsDraw(key)) renderPairing();
       return;
@@ -1492,6 +1612,7 @@ void renderIdle() {
       if (qrNeedsDraw(key)) renderWifiSetup();
       return;
     }
+    if (wifiNoticeDue()) { lastDrawnQr[0] = 0; renderNeedsWifi(); return; }
     lastDrawnQr[0] = 0;
     renderLogo();
     return;
@@ -1526,8 +1647,8 @@ void drawActiveMark(float k) {
   drawPauseMark(CENTER_X, CENTER_Y, 64, fadeIn(C_ACCENT, k));
 }
 
-// Startceremonin: grön bock (lådans bekräftelse) → CLOCK ON. → 00:01–00:05
-// → märket tonar in. Klockan går redan under ceremonin.
+// Startceremonin: grön bock (lådans bekräftelse) → märket tonar in.
+// Klockan går redan under ceremonin.
 void renderCheckedIn() {
   sprite.fillSprite(BG);
   unsigned long t = millis() - phaseStartMs;
@@ -1541,28 +1662,8 @@ void renderCheckedIn() {
     uint16_t g = fadeIn(C_GREEN, fade);
     drawRing(CENTER_X, CENTER_Y, RING_R, 6, g);
     drawCheck(CENTER_X, CENTER_Y, RING_R, 9, draw, g);
-  } else if (t < CER_TEXT_END) {
-    float u = (t - CER_CHECK_END) / (float)STARTED_TEXT_MS;
-    float k = (u < 0.2) ? u / 0.2 : ((u > 0.8) ? (1.0 - u) / 0.2 : 1.0);
-    sprite.setFreeFont(&FreeSansBold24pt7b);
-    drawHeavy("CLOCK ON.", CENTER_X, CENTER_Y, fadeIn(C_INK, k));
-  } else if (t < CER_FADE_END) {
-    unsigned long ct = t - CER_TEXT_END;
-    int n;
-    float k;
-    if (t < CER_COUNT_END) {
-      n = ct / 1000 + 1;
-      if (n > COUNT_SECONDS) n = COUNT_SECONDS;
-      float within = (ct % 1000) / 1000.0;
-      k = (within < 0.15) ? within / 0.15 : 1.0;
-    } else {
-      n = COUNT_SECONDS;
-      k = 1.0 - (t - CER_COUNT_END) / (float)COUNT_FADE_MS;
-    }
-    sprite.setFreeFont(&FreeSansBold24pt7b);
-    drawHeavy(formatDuration(n * 1000UL), CENTER_X, CENTER_Y, fadeIn(C_INK, k));
   } else {
-    float k = (t - CER_FADE_END) / (float)LOGO_FADE_MS;
+    float k = (t - CER_CHECK_END) / (float)LOGO_FADE_MS;
     if (k > 1.0) k = 1.0;
     drawActiveMark(k);
   }
@@ -1570,19 +1671,6 @@ void renderCheckedIn() {
 }
 
 // Appens flöde: två steg, och en mätare av två staplar som säger var man är.
-void renderAwaitingLid() {
-  sprite.fillSprite(BG);
-  const int segW = 26, segH = 6, segGap = 8;
-  int sx = CENTER_X - segW - segGap / 2;
-  sprite.fillSmoothRoundRect(sx, 22, segW, segH, segH / 2, HUE);
-  sprite.fillSmoothRoundRect(sx + segW + segGap, 22, segW, segH, segH / 2, phonePlaced ? HUE : LINE);
-
-  sprite.setTextDatum(MC_DATUM);
-  sprite.setFreeFont(&FreeSansBold24pt7b);
-  drawHeavy(phonePlaced ? "LID DOWN." : "PHONE IN.", CENTER_X, 82, INK);
-  drawBody(phonePlaced ? "Clock starts then." : "Tag on the mark.", CENTER_X, 132, INK_2);
-  pushFrame();
-}
 
 void renderActive() {
   sprite.fillSprite(BG);
@@ -1637,58 +1725,50 @@ void renderEnded() {
 // ─── Sessionslogik ──────────────────────────────────────────
 
 // Startar klockan. Bara en app-paus berättar det för appen.
-void startSession(Owner owner) {
-  sessionOwner = owner;
-  if (owner == OWNER_TAG) strncpy(sessionTagUid, tagUid, sizeof(sessionTagUid));
-  else sessionTagUid[0] = 0;
+void startSession() {
+  strncpy(sessionTagUid, tagUid, sizeof(sessionTagUid));
 
   activeSeq = nextSeq++;
   prefs.putUInt("next_seq", nextSeq);
+
+  // Tala om för servern att pausen börjat.
+  if (sessionTagUid[0]) {
+    xSemaphoreTake(netMutex, portMAX_DELAY);
+    startNoticeSeq = activeSeq;
+    strncpy(startNoticeTag, sessionTagUid, sizeof(startNoticeTag));
+    xSemaphoreGive(netMutex);
+    startNoticeRequested = true;
+  }
   sessionAccumMs   = 0;
   sessionSegmentMs = millis();
   lastCheckpointMs = millis();
   playStartTone();
-  if (owner == OWNER_APP) sendBLE("session_started:%lu", (unsigned long)activeSeq);
-  Serial.printf("Session %lu startad (%s)\n", (unsigned long)activeSeq,
-                owner == OWNER_TAG ? sessionTagUid : "app");
+  Serial.printf("Session %lu startad (%s)\n", (unsigned long)activeSeq, sessionTagUid);
   setPhase(CHECKED_IN);
 }
 
 void endSession(bool completed) {
   unsigned long dur = elapsedMs();
   sessionAccumMs = dur;
-  Owner owner = sessionOwner;
 
   if (dur < MIN_SESSION_MS) {
     Serial.println("Session för kort, kastas");
     prefs.remove("cp_seq");
     activeSeq = 0;
-    sessionOwner = OWNER_NONE;
     setPhase(IDLE);
     return;
   }
 
   endedWasRecord = (dur > statLongestMs);
 
-  if (owner == OWNER_TAG) {
-    WifiRecord w;
-    w.seq = activeSeq;
-    w.durationMs = dur;
-    w.endedAtMillis = millis();
-    w.completed = completed ? 1 : 0;
-    strncpy(w.tagUid, sessionTagUid, sizeof(w.tagUid));
-    wifiQueuePush(w);
-    lastUploadTryMs = 0;   // försök direkt
-  } else {
-    SessionRecord r;
-    r.seq           = activeSeq;
-    r.durationMs    = dur;
-    r.endedAtMillis = millis();
-    r.completed     = completed ? 1 : 0;
-    queuePush(r);
-    sendBLE("session_ended:%lu:%lu:%d:0",
-            (unsigned long)r.seq, (unsigned long)r.durationMs, r.completed);
-  }
+  WifiRecord w;
+  w.seq = activeSeq;
+  w.durationMs = dur;
+  w.endedAtMillis = millis();
+  w.completed = completed ? 1 : 0;
+  strncpy(w.tagUid, sessionTagUid, sizeof(w.tagUid));
+  wifiQueuePush(w);
+  lastUploadTryMs = 0;   // försök direkt
 
   statTotalMs += dur;
   statLatestMs = dur;
@@ -1701,7 +1781,6 @@ void endSession(bool completed) {
                 (unsigned long)activeSeq, dur, completed ? 1 : 0);
   endedDurationMs = dur;
   activeSeq = 0;
-  sessionOwner = OWNER_NONE;
   setPhase(ENDED);
   playEndTone();
 }
@@ -1709,7 +1788,6 @@ void endSession(bool completed) {
 void checkpoint() {
   prefs.putUInt("cp_seq", activeSeq);
   prefs.putUInt("cp_ms", elapsedMs());
-  prefs.putUChar("cp_owner", (uint8_t)sessionOwner);
   prefs.putString("cp_tag", sessionTagUid);
   lastCheckpointMs = millis();
 }
@@ -1718,21 +1796,16 @@ void recoverCheckpoint() {
   uint32_t cpSeq = prefs.getUInt("cp_seq", 0);
   if (cpSeq == 0) return;
   uint32_t cpMs = prefs.getUInt("cp_ms", 0);
-  Owner owner = (Owner)prefs.getUChar("cp_owner", OWNER_APP);
   String tag = prefs.getString("cp_tag", "");
   Serial.printf("Återställer avbruten session %lu\n", (unsigned long)cpSeq);
-  if (cpMs >= MIN_SESSION_MS) {
-    if (owner == OWNER_TAG && tag.length() > 0) {
-      WifiRecord w;
-      w.seq = cpSeq; w.durationMs = cpMs; w.endedAtMillis = 0; w.completed = 0;
-      strncpy(w.tagUid, tag.c_str(), sizeof(w.tagUid));
-      w.tagUid[sizeof(w.tagUid) - 1] = 0;
-      wifiQueuePush(w);
-    } else {
-      SessionRecord r;
-      r.seq = cpSeq; r.durationMs = cpMs; r.endedAtMillis = 0; r.completed = 0;
-      queuePush(r);
-    }
+  // Utan tagg går pausen inte att ladda upp (servern hittar användaren via
+  // taggen), så en kontrollpunkt från en app-paus i äldre firmware slängs.
+  if (cpMs >= MIN_SESSION_MS && tag.length() > 0) {
+    WifiRecord w;
+    w.seq = cpSeq; w.durationMs = cpMs; w.endedAtMillis = 0; w.completed = 0;
+    strncpy(w.tagUid, tag.c_str(), sizeof(w.tagUid));
+    w.tagUid[sizeof(w.tagUid) - 1] = 0;
+    wifiQueuePush(w);
     statTotalMs += cpMs;
     statLatestMs = cpMs;
     if (cpMs > statLongestMs) statLongestMs = cpMs;
@@ -1742,18 +1815,6 @@ void recoverCheckpoint() {
   prefs.remove("cp_seq");
 }
 
-// ─── Backlog (Bluetooth, app-pauser) ────────────────────────
-
-void sendNextBacklog() {
-  if (!deviceConnected || queueCount == 0) { backlogSending = false; return; }
-  SessionRecord& r = queueBuf[0];
-  backlogSending  = true;
-  backlogAwaitSeq = r.seq;
-  backlogSentAt   = millis();
-  unsigned long ago = r.endedAtMillis > 0 ? (millis() - r.endedAtMillis) : 0;
-  sendBLE("session_ended:%lu:%lu:%d:%lu",
-          (unsigned long)r.seq, (unsigned long)r.durationMs, r.completed, ago);
-}
 
 // ─── BLE-callbacks ──────────────────────────────────────────
 
@@ -1766,10 +1827,8 @@ class CharCallbacks : public BLECharacteristicCallbacks {
     Serial.printf("← \"%s\"\n", msg.c_str());
     lastActivityMs = millis();   // appen vill något: väck skärmen
 
-    if (msg.startsWith("session_ack:")) { pendingAckSeq = msg.substring(12).toInt(); return; }
-    if (msg.startsWith("phone_down"))   { pendingPhoneDown = true; return; }
-    if (msg.startsWith("phone_up"))     { pendingPhoneUp = true; return; }
-    if (msg.startsWith("set_mode:"))    { pendingSetMode = true; return; }
+    // Inga inkommande kommandon just nu. Karaktäristiken står kvar för
+    // wifi-inställningen, som appen ska skicka hit.
   }
 };
 
@@ -1780,24 +1839,41 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer* s) {
     deviceConnected = false;
-    backlogSending = false;
-    backlogStartAt = 0;
     handshakeAt = 0;
     Serial.println("App frånkopplad");
     BLEDevice::startAdvertising();
   }
 };
 
+// Lådans nätverksläge till appen, för nätverksstatus-sidan:
+//   net:<wifi uppe 0/1>:<nät sparat 0/1>:<pauser i kön>:<nätets namn>
+// Namnet ligger sist och kan innehålla kolon, så appen ska ta allt efter det
+// tredje fältet som namn. Tomt när lådan inte är ansluten.
+void sendNetStatus() {
+  lastNetUp     = wifiUp ? 1 : 0;
+  lastNetSaved  = wifiSavedCount > 0 ? 1 : 0;
+  lastNetQueued = wifiQueueCount;
+  sendBLE("net:%d:%d:%d:%s", lastNetUp, lastNetSaved, lastNetQueued,
+          wifiUp ? WiFi.SSID().c_str() : "");
+}
+
 void onConnectedHandshake() {
   sendBLE("hello:%s", boxIdBle.c_str());
   delay(20);
-  sendBLE("state:%s:%lu:%lu", phaseName(phase),
-          sessionOwner == OWNER_TAG ? 0UL : (unsigned long)elapsedMs(),
-          sessionOwner == OWNER_TAG ? 0UL : (unsigned long)activeSeq);
+  // Lådans ID som servern känner den vid, inte BLE-id:t. Utan det hamnar
+  // samma fysiska låda i databasen under två olika ID beroende på om det var
+  // lådan eller appen som skrev raden, och statistik per låda blir fel.
+  // Eget meddelande och inte ett extra fält i hello: appens parser lägger
+  // ihop allt efter "hello:" till ett id, så ett fält till hade förstört
+  // lådans identitet i appar som inte uppdaterats.
+  sendBLE("boxid:%s", BOX_ID);
+  delay(20);
+  sendBLE("state:%s:0:0", phaseName(phase));
   delay(20);
   sendBLE("battery:%d", batteryPercent());
   lastBatteryReport = millis();
-  backlogStartAt = millis() + BACKLOG_START_MS;
+  delay(20);
+  sendNetStatus();
 }
 
 // ─── Locket ─────────────────────────────────────────────────
@@ -1812,23 +1888,17 @@ void handleLid() {
 
   lidClosed = raw;
   lastActivityMs = now;
-  // Lock-händelser är appens bara när appen äger (eller kan komma att äga)
-  // pausen. Under en NFC-paus, eller på loggan, säger de appen ingenting
-  // den ska agera på.
-  bool tellApp = (sessionOwner == OWNER_APP) || phase == AWAITING_LID;
-
   if (lidClosed) {
-    if (tellApp) sendBLE("lid_closed");
-
     // Locket på = klar med lådan. En kvarstående QR-kod försvinner.
     if (pairHold) {
       pairHold = false;
+      pairScanned = false;
       pairCode[0] = 0;
       Serial.println("QR-koden borttagen (locket stängt)");
     }
 
     if (phase == RESPITE) {
-      if (sessionOwner == OWNER_TAG && !tagPresent) {
+      if (!tagPresent) {
         // Telefonen togs ur och locket stängdes över en tom låda.
         endSession(true);
       } else {
@@ -1836,21 +1906,15 @@ void handleLid() {
         setPhase(ACTIVE);
         rfid.PCD_AntennaOff();   // spar ström tills locket öppnas igen
       }
-    } else if (phase == AWAITING_LID) {
-      // Appens paus: inga tummar längre, så locket är incheckningen.
-      // Samma ordning som v7 skickade när tummarna höll färdigt.
-      sendBLE("checkin_complete");
-      delay(20);
-      startSession(OWNER_APP);
     } else if (phase == IDLE && tagPresent) {
       // Lådans egen paus: en känd tagg ligger i lådan och locket stängdes.
       // Bara en stängning räknas, inte ett lock som redan var stängt vid
       // start — så en omstart med telefonen i lådan startar ingen paus.
-      if (tagInfo == TI_KNOWN) startSession(OWNER_TAG);
+      if (tagInfo == TI_KNOWN) startSession();
       else if (tagInfo == TI_PENDING || tagInfo == TI_OFFLINE) startWhenKnown = true;
     }
   } else {
-    if (tellApp) sendBLE("lid_opened");
+    sendBLE("lid_opened");
     startWhenKnown = false;
     if (sessionRunning()) {
       sessionAccumMs += millis() - sessionSegmentMs;
@@ -1868,6 +1932,7 @@ void onTagArrived() {
   Serial.printf("Tagg: %s\n", tagUid);
   lastActivityMs = millis();
   pairHold = false;        // en telefon i lådan går före en kvarstående QR-kod
+  pairScanned = false;
   pairedShownAt = 0;
   tagInfo = TI_PENDING;
   tagOwnerName[0] = 0;
@@ -1880,10 +1945,11 @@ void onTagGone() {
   lastActivityMs = millis();
   startWhenKnown = false;
   // Under en NFC-paus med öppet lock = telefonen lyftes ur → klar.
-  if (phase == RESPITE && sessionOwner == OWNER_TAG) endSession(true);
+  if (phase == RESPITE) endSession(true);
   // Okänd tagg: låt QR-koden stå kvar så att den går att skanna.
   if (phase == IDLE && tagInfo == TI_UNKNOWN && pairCode[0]) {
     pairHold = true;
+    pairScanned = false;     // ingen har skannat förrän servern säger det
     strncpy(pairHoldUid, tagUid, sizeof(pairHoldUid));
     pairHoldUntil = millis() + PAIR_HOLD_MS;
     Serial.println("QR-koden står kvar medan någon skannar");
@@ -1947,7 +2013,7 @@ void handleLookup() {
   if (lookupDone) {
     lookupDone = false;
     char uid[21], status[12], name[33], code[11], url[96];
-    bool ok;
+    bool ok, scanned;
     xSemaphoreTake(netMutex, portMAX_DELAY);
     strncpy(uid, lookupResultUid, sizeof(uid));
     ok = lookupOk;
@@ -1955,19 +2021,28 @@ void handleLookup() {
     strncpy(name, lookupName, sizeof(name));
     strncpy(code, lookupCode, sizeof(code));
     strncpy(url, lookupUrl, sizeof(url));
+    scanned = lookupScanned;
     xSemaphoreGive(netMutex);
 
     // Svar för den kvarstående QR-koden: har någon registrerat taggen?
     if (!tagPresent && pairHold && strcmp(uid, pairHoldUid) == 0) {
       if (ok && strcmp(status, "known") == 0) {
         pairHold = false;
+        pairScanned = false;
         pairCode[0] = 0;
         strncpy(pairedName, name, sizeof(pairedName));
         pairedShownAt = now;
         Serial.printf("Taggen registrerad: %s\n", pairedName);
       } else if (ok && strcmp(status, "unknown") == 0) {
+        if (strcmp(code, pairCode) != 0) pairScanned = false;   // ny kod: börja om från QR
         strncpy(pairCode, code, sizeof(pairCode));   // en ny kod om den gamla gått ut
         strncpy(pairUrl, url, sizeof(pairUrl));
+        // Skannad: visa SCANNED ✓. Inte längre (ny kod utfärdad): tillbaka till QR.
+        if (scanned && !pairScanned) {
+          pairScannedAt = now;
+          Serial.println("QR-koden skannad, väntar på bekräftelse");
+        }
+        pairScanned = scanned;
       }
       // Inget svar: koden står kvar, nästa fråga om en stund.
     }
@@ -1980,7 +2055,13 @@ void handleLookup() {
         bool wasKnown = (tagInfo == TI_KNOWN);
         tagInfo = TI_KNOWN;
         strncpy(tagOwnerName, name, sizeof(tagOwnerName));
-        if (!wasKnown) Serial.printf("Känd tagg: %s\n", tagOwnerName);
+        if (!wasKnown) {
+          Serial.printf("Känd tagg: %s\n", tagOwnerName);
+          // En känd telefon ligger i lådan men locket är öppet: pausen har
+          // INTE börjat än. Är appen framme kan den visa CLOSE THE POD TO
+          // START. Pausen startar när locket stängs, inte här.
+          if (!lidClosed && phase == IDLE) sendBLE("ready_to_close");
+        }
       } else if (strcmp(status, "unknown") == 0) {
         tagInfo = TI_UNKNOWN;
         strncpy(pairCode, code, sizeof(pairCode));
@@ -1992,7 +2073,7 @@ void handleLookup() {
       // Locket stängdes medan svaret var på väg.
       if (startWhenKnown && phase == IDLE && lidClosed && tagInfo == TI_KNOWN) {
         startWhenKnown = false;
-        startSession(OWNER_TAG);
+        startSession();
       }
     }
   }
@@ -2001,6 +2082,7 @@ void handleLookup() {
   // något annat, och fråga annars servern med jämna mellanrum.
   if (pairHold && (phase != IDLE || (long)(now - pairHoldUntil) >= 0)) {
     pairHold = false;
+    pairScanned = false;
     pairCode[0] = 0;
     Serial.println("QR-koden borttagen");
   }
@@ -2123,6 +2205,58 @@ void setBacklightLevel(uint8_t level) {
   blLevel = level;
 }
 
+// ── Mjuk tändning och släckning ──
+//
+// Drivarens 16 steg är jämna i ström, men ögat ser ljus ungefär som roten ur
+// strömmen: stegen 1→2→3 i mörkret ser ut som stora hopp, 14→15→16 knappt
+// alls. Toningen går därför jämnt i roten ur nivån — långsamt nere i mörkret,
+// snabbare när det redan är ljust — så att den ser jämn ut.
+const unsigned long BL_FADE_IN_MS  = 600;   // upp när lådan vaknar
+const unsigned long BL_FADE_OUT_MS = 800;   // ner innan den somnar
+
+bool          blFading    = false;
+uint8_t       blFadeFrom  = 0;
+uint8_t       blFadeTo    = 0;
+unsigned long blFadeStart = 0;
+unsigned long blFadeDur   = 1;
+
+// Startar en toning från nuvarande nivå. Sköts sedan av updateBacklightFade()
+// i loopen, så att skärmen fortsätter röra sig under tiden.
+void startBacklightFade(uint8_t to, unsigned long ms) {
+  if (to > BL_STEPS) to = BL_STEPS;
+  blFadeFrom  = blLevel;
+  blFadeTo    = to;
+  blFadeStart = millis();
+  blFadeDur   = ms > 0 ? ms : 1;
+  blFading    = true;
+}
+
+void updateBacklightFade() {
+  if (!blFading) return;
+  float t = (millis() - blFadeStart) / (float)blFadeDur;
+  if (t >= 1.0) t = 1.0;
+  float a = sqrtf(blFadeFrom), b = sqrtf(blFadeTo);
+  float r = a + (b - a) * t;
+  uint8_t level = (t >= 1.0) ? blFadeTo : (uint8_t)(r * r + 0.5);
+  if (level != blLevel) setBacklightLevel(level);
+  if (t >= 1.0) blFading = false;
+}
+
+// Samma toning, men väntar tills den är klar. Används precis innan lådan
+// somnar. Skärmen ritas om under tiden, så att märket fortsätter andas.
+void fadeBacklightAndWait(uint8_t to, unsigned long ms) {
+  startBacklightFade(to, ms);
+  while (blFading) {
+    unsigned long now = millis();
+    if (spriteOK && !screenOff && now - lastFrame >= FRAME_INTERVAL_MS) {
+      renderFrame();
+      lastFrame = now;
+    }
+    updateBacklightFade();
+    delay(5);
+  }
+}
+
 // Sätts av hibernatePause(): djupsömnen ska lämna skärmen tänd.
 bool sleepKeepScreen = false;
 
@@ -2167,9 +2301,9 @@ int64_t rtcNowUs() {
 }
 
 void screenSleep() {
+  fadeBacklightAndWait(0, BL_FADE_OUT_MS);   // tona ut först, sedan av
   tft.writecommand(TFT_DISPOFF);
   tft.writecommand(TFT_SLPIN);
-  setBacklightLevel(0);
   screenOff = true;
   screenOffSince = millis();
   Serial.println("Skärmvila");
@@ -2178,10 +2312,14 @@ void screenSleep() {
 void screenWake() {
   tft.writecommand(TFT_SLPOUT);
   delay(120);                       // ST7789 behöver 120 ms efter SLPOUT
-  tft.writecommand(TFT_DISPON);
-  setBacklightLevel(BL_STEPS);
   screenOff = false;
   lastDrawnQr[0] = 0;               // rita om allt, också en QR-kod
+  maybeShowWifiNotice();
+  // Rätt bild in i skärmen medan ljuset är släckt, sedan tonas den upp.
+  // Annars syns bilden från innan skärmvilan en stund.
+  if (spriteOK) { renderFrame(); lastFrame = millis(); }
+  tft.writecommand(TFT_DISPON);
+  startBacklightFade(BL_STEPS, BL_FADE_IN_MS);
   Serial.println("Skärmen vaken");
 }
 
@@ -2205,10 +2343,10 @@ void goToDeepSleep() {
       gpio_hold_en((gpio_num_t)p);
     }
   } else {
-    // Skärmen av med egna kommandon, bakgrundsljuset av.
+    // Tona ut, sedan skärmen av med egna kommandon.
+    fadeBacklightAndWait(0, BL_FADE_OUT_MS);
     tft.writecommand(TFT_DISPOFF);
     tft.writecommand(TFT_SLPIN);
-    setBacklightLevel(0);
   }
 
   // Håll pinnarnas lägen genom sömnen (annars flyter de och läcker ström).
@@ -2257,7 +2395,7 @@ void hibernatePause() {
   sleepPause.magic     = SLEEP_PAUSE_MAGIC;
   // Paustecknet står kvar, nedtonat, genom hela sömnen.
   renderActive();
-  setBacklightLevel(PAUSE_SCREEN_LEVEL);
+  fadeBacklightAndWait(PAUSE_SCREEN_LEVEL, BL_FADE_OUT_MS);
   sleepKeepScreen = true;
   Serial.printf("Pausdvala: session %lu, %lu ms hittills\n",
                 (unsigned long)activeSeq, (unsigned long)sleepPause.accumMs);
@@ -2269,7 +2407,6 @@ void hibernatePause() {
 void restorePauseFromSleep() {
   int64_t sleptMs = (rtcNowUs() - sleepPause.sleptAtUs) / 1000;
   if (sleptMs < 0) sleptMs = 0;
-  sessionOwner = OWNER_TAG;
   activeSeq    = sleepPause.seq;
   strncpy(sessionTagUid, sleepPause.tagUid, sizeof(sessionTagUid));
   sessionAccumMs = sleepPause.accumMs + (uint32_t)sleptMs;
@@ -2447,7 +2584,7 @@ void handleSleep() {
   }
 
   // Pausdvala: NFC-paus, stängt lock, pausmärket har synts en stund.
-  if (phase == ACTIVE && sessionOwner == OWNER_TAG && lidClosed &&
+  if (phase == ACTIVE && lidClosed &&
       now - phaseStartMs > PAUSE_SLEEP_AFTER_MS && !uploadBusy && !lookupRequested) {
     hibernatePause();
   }
@@ -2479,12 +2616,15 @@ void setup() {
   digitalWrite(POWER_PIN, HIGH);
   pinMode(LID_PIN, INPUT_PULLUP);
 
-  tft.init();
-  // Ur pausdvalan står drivaren kvar på det nedtonade steget (pinnen var hög
-  // hela sömnen). Nollställ den och tänd fullt.
+  // Bakgrundsljuset AV innan skärmen startas. tft.init() slår på skärmen
+  // innan något ritats och tänder ljuset sist — det var blinket: skärmminnets
+  // slumpbild syntes en stund. Ur pausdvalan var pinnen dessutom hög hela
+  // sömnen. Låg i >2,5 ms nollställer också drivaren.
+  pinMode(LCD_BL_PIN, OUTPUT);
+  digitalWrite(LCD_BL_PIN, LOW);
+  tft.init();                       // tänder ljuset fullt på slutet…
   blLevel = 1;
-  setBacklightLevel(0);
-  setBacklightLevel(BL_STEPS);
+  setBacklightLevel(0);             // …så det släcks direkt igen
   tft.setRotation(1);
   initColors();
   tft.fillScreen(BG);
@@ -2566,8 +2706,14 @@ void setup() {
   lastLidRaw = lidClosed;
   setPhase(IDLE);
   if (resumePause) restorePauseFromSleep();
+  else maybeShowWifiNotice();
 
-  Serial.printf("Pause Pod v8 redo. låda=%s ble_id=%s seq=%lu wifi-kö=%d heap=%u största block=%u\n",
+  // Första bilden ritas medan ljuset är släckt, sedan tonas den upp.
+  if (spriteOK) renderFrame();
+  lastFrame = millis();
+  startBacklightFade(BL_STEPS, BL_FADE_IN_MS);
+
+  Serial.printf("Pause Pod v8.5 redo. låda=%s ble_id=%s seq=%lu wifi-kö=%d heap=%u största block=%u\n",
                 BOX_ID, boxIdBle.c_str(), (unsigned long)nextSeq, wifiQueueCount,
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
@@ -2582,56 +2728,6 @@ void loop() {
 
   unsigned long now = millis();
 
-  if (pendingAckSeq != 0) {
-    uint32_t seq = pendingAckSeq;
-    pendingAckSeq = 0;
-    queueRemoveSeq(seq);
-    if (backlogSending && seq == backlogAwaitSeq) {
-      backlogSending = false;
-      sendNextBacklog();
-    }
-  }
-
-  // Paus vald i appen → be om telefonen
-  if (pendingSetMode) {
-    pendingSetMode = false;
-    if (phase == IDLE) {
-      startWhenKnown = false;
-      phonePlaced = false;
-      setPhase(AWAITING_LID);
-    }
-  }
-
-  // Telefonen nedlagd enligt appen → be om locket
-  if (pendingPhoneDown) {
-    pendingPhoneDown = false;
-    if (phase == IDLE || (phase == AWAITING_LID && !phonePlaced)) {
-      phonePlaced = true;
-      setPhase(AWAITING_LID);
-    }
-  }
-
-  // Appens phone_up — gäller bara appens egna paus, som i v7. En NFC-paus
-  // avslutas av taggen, inte av en telefon som kanske inte ens är ansluten.
-  if (pendingPhoneUp) {
-    pendingPhoneUp = false;
-    if (phase == RESPITE && sessionOwner == OWNER_APP) {
-      endSession(true);
-    } else if (phase == AWAITING_LID && phonePlaced) {
-      phonePlaced = false;
-      setPhase(AWAITING_LID);
-    }
-  }
-
-  if (phase == AWAITING_LID && !phonePlaced && now - phaseStartMs > PHONE_WAIT_MAX_MS) {
-    phonePlaced = true;
-    setPhase(AWAITING_LID);
-  }
-
-  if (phase == AWAITING_LID && phonePlaced && now - phaseStartMs > AWAIT_LID_MAX_MS) {
-    setPhase(IDLE);
-  }
-
   if (phase == CHECKED_IN && now - phaseStartMs > CER_END) {
     setPhase(ACTIVE);
     if (lidClosed) rfid.PCD_AntennaOff();
@@ -2644,7 +2740,7 @@ void loop() {
   // NFC-paus med öppet lock: ingen tagg sedan TAG_GONE_MS = telefonen lyft.
   // Fångar också fallet där ett läsglapp under stängt lock redan hade
   // markerat taggen som borta, så att onTagGone() aldrig kommer igen.
-  if (phase == RESPITE && sessionOwner == OWNER_TAG && !tagPresent &&
+  if (phase == RESPITE && !tagPresent &&
       now - max(respiteStartMs, tagLastSeenMs) > TAG_GONE_MS) {
     endSession(true);
   }
@@ -2658,12 +2754,7 @@ void loop() {
   }
 
   if (deviceConnected != lastDeviceConnected) {
-    if (deviceConnected) {
-      handshakeAt = now + HANDSHAKE_DELAY_MS;
-    } else if (phase == AWAITING_LID && !phonePlaced) {
-      phonePlaced = true;
-      setPhase(AWAITING_LID);
-    }
+    if (deviceConnected) handshakeAt = now + HANDSHAKE_DELAY_MS;
     lastDeviceConnected = deviceConnected;
   }
 
@@ -2672,19 +2763,17 @@ void loop() {
     onConnectedHandshake();
   }
 
-  if (backlogStartAt != 0 && now >= backlogStartAt) {
-    backlogStartAt = 0;
-    if (!backlogSending) sendNextBacklog();
-  }
-
-  if (backlogSending && now - backlogSentAt > ACK_TIMEOUT_MS) {
-    backlogSending = false;
-    sendNextBacklog();
-  }
-
   if (deviceConnected && now - lastBatteryReport > BATTERY_REPORT_MS) {
     sendBLE("battery:%d", batteryPercent());
     lastBatteryReport = now;
+  }
+
+  // Nätverksläget skickas bara när det ändras, inte med jämna mellanrum.
+  if (deviceConnected &&
+      ((wifiUp ? 1 : 0) != lastNetUp ||
+       (wifiSavedCount > 0 ? 1 : 0) != lastNetSaved ||
+       wifiQueueCount != lastNetQueued)) {
+    sendNetStatus();
   }
 
   static unsigned long lastHeapLog = 0;
@@ -2707,10 +2796,19 @@ void loop() {
   updateShownBattery();
 
   if (spriteOK && !screenOff && now - lastFrame >= FRAME_INTERVAL_MS) {
+    renderFrame();
+    lastFrame = now;
+  }
+  updateBacklightFade();
+
+  delay(1);
+}
+
+// Ritar skärmen för fasen lådan är i.
+void renderFrame() {
     switch (phase) {
       case IDLE:         renderIdle();        break;
       case CHECKED_IN:   renderCheckedIn();   break;
-      case AWAITING_LID: renderAwaitingLid(); break;
       case ACTIVE:
         // Stillbild: rita en gång per fas, inte 30 gånger i sekunden.
         if (strcmp(lastDrawnQr, "active") != 0) {
@@ -2722,8 +2820,4 @@ void loop() {
       case ENDED:        renderEnded();       break;
       default:           renderActive();      break;   // STATS/CHECKING_IN/… nås inte längre
     }
-    lastFrame = now;
-  }
-
-  delay(1);
 }

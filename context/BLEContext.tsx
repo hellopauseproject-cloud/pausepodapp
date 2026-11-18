@@ -17,6 +17,15 @@ const PAIRED_BOX_KEY = 'paired_box_id';
 const REQUESTED_MTU = 185;
 const RECONNECT_DELAY_MS = 1500;
 
+/** Lådans nätverksläge, senast den sa något. Null tills ett `net` kommit. */
+export interface BoxNetStatus {
+  wifiUp: boolean;
+  networkSaved: boolean;
+  /** Pauser som väntar i lådans kö på att nå servern. */
+  queued: number;
+  ssid: string;
+}
+
 export const BLEControlContext = createContext<{
   connectToPausePod: () => void;
   disconnect: () => void;
@@ -33,6 +42,10 @@ export const BLEControlContext = createContext<{
    *  state-meddelandet redan processats, vilket tyst kastar RESTORE.
    *  SessionContext läser den här istället för isPairedBox-booleanen. */
   isPairedBoxRef: React.RefObject<boolean>;
+  /** Lådans serverkända id (BOX001), ur `boxid`. Null i äldre firmware. */
+  serverBoxId: string | null;
+  /** Lådans nätverksläge, ur `net`. Null i äldre firmware. */
+  netStatus: BoxNetStatus | null;
 } | null>(null);
 
 export const BLEMessageContext = createContext<{
@@ -54,6 +67,8 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [boxId, setBoxId] = useState<string | null>(null);
+  const [serverBoxId, setServerBoxId] = useState<string | null>(null);
+  const [netStatus, setNetStatus] = useState<BoxNetStatus | null>(null);
   const [isPairedBox, setIsPairedBox] = useState(false);
   const isPairedBoxRef = useRef(false);
   const deviceRef = useRef<Device | null>(null);
@@ -215,6 +230,22 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
                     handleHello(parsed.boxId);
                     return;
                   }
+                  // boxid och net är lådans *tillstånd* och inte händelser i
+                  // ritualen: de hamnar i state här istället för hos
+                  // prenumeranterna, på samma sätt som hello.
+                  if (parsed.type === 'boxid') {
+                    setServerBoxId(parsed.serverBoxId);
+                    return;
+                  }
+                  if (parsed.type === 'net') {
+                    setNetStatus({
+                      wifiUp: parsed.wifiUp,
+                      networkSaved: parsed.networkSaved,
+                      queued: parsed.queued,
+                      ssid: parsed.ssid,
+                    });
+                    return;
+                  }
                   messageHandlersRef.current.forEach(handler => handler(parsed));
                 }
               );
@@ -279,6 +310,10 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
     setBoxId(null);
     setIsPairedBox(false);
     isPairedBoxRef.current = false;
+    // Nätverksläget gäller den låda vi var anslutna till. Stod det kvar
+    // skulle statussidan visa en annan lådas wifi som om det var den här.
+    setServerBoxId(null);
+    setNetStatus(null);
   };
 
   const disconnect = () => {
@@ -292,7 +327,10 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
   const sendPhoneDown = () => sendRaw(encodePhoneDown());
   const sendPhoneUp = () => sendRaw(encodePhoneUp());
 
-  const controlValue = { connectToPausePod, disconnect, isConnected, isScanning, boxId, isPairedBox, isPairedBoxRef };
+  const controlValue = {
+    connectToPausePod, disconnect, isConnected, isScanning, boxId, isPairedBox,
+    isPairedBoxRef, serverBoxId, netStatus,
+  };
   const messageValue = { subscribeToBoxMessages, sendSessionAck, sendSetMode, sendPhoneDown, sendPhoneUp };
 
   return (
