@@ -9,7 +9,7 @@
 //
 // Webbvarianten finns för att kunna titta på UI:t i en webbläsare utan att
 // bygga om appen. Den är ett granskningsverktyg, inte en andra plattform:
-// lådflödet, sensorerna och kameran finns inte där.
+// lådans anslutning, sensorerna och kameran finns inte där.
 import { BleManager } from 'react-native-ble-plx';
 
 export { ConnectionPriority } from 'react-native-ble-plx';

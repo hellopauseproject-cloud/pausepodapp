@@ -374,7 +374,7 @@ function StatsScreen() {
   useEffect(() => { getSelectedCategories().then(setTagCats); }, []);
 
   // `intention` kan vara en etikett (`FOCUS`, som pausskärmen och taggarna
-  // skriver) eller ett id (`focus`, som lådflödets kö skriver). Chippen
+  // skriver) eller ett id (`focus`, som appens gamla lådkö skrev). Chippen
   // markeras i båda fallen.
   const selectedTagLabel = (raw: string | null) =>
     tagCats.find(c => c.label === raw || c.id === raw)?.label ?? null;

@@ -51,14 +51,18 @@ tak, och det är den gränsen som avgör vad som får finnas. Chatten var en
 sådan källa, och fick finnas först när taket flyttades från hur mycket de
 andra skriver till hur ofta man själv läser (se *De sociala notiserna*).
 
-**Det är ingen push, och det är hela skälet att den fick finnas.** Bara appen
-kan registrera en paus — `pause_sessions` skrivs från det lådlösa flödet
-([app/pausing.tsx](app/pausing.tsx)), lådflödets kö
-([lib/sessionOutbox.ts](lib/sessionOutbox.ts)) och krasch-återställningen
-([app/_layout.tsx](app/_layout.tsx)), alla tre i appen. Resttiden kan alltså
-inte ändras medan appen är stängd, och därför är en text som räknas ut vid
-schemaläggningen aldrig gammal när den visas. Ingen push-token, ingen trigger,
-ingen edge-funktion, inget `pg_net`.
+**Det är ingen push, och det är hela skälet att den fick finnas.**
+`pause_sessions` skrivs från pausskärmen ([app/pausing.tsx](app/pausing.tsx))
+och krasch-återställningen ([app/_layout.tsx](app/_layout.tsx)), båda i
+appen, så resttiden ändras normalt inte medan appen är stängd och en text som
+räknas ut vid schemaläggningen är sällan gammal när den visas. Ingen
+push-token, ingen trigger, ingen edge-funktion, inget `pg_net`.
+
+**Undantaget är en lådpaus**, och det är ett pris och inte ett förbiseende:
+`box-session` skriver raden utan att appen är inblandad, så ligger telefonen i
+lådan klockan 20 kan notisen säga en resttid som redan är inhämtad. Fönstret
+läggs om vid appstart och vid `AppState`-byten, så felet rättar sig själv — och
+en notis som ber om en paus man just tagit är billigare än en push.
 
 Samma insikt ger de framtida dagarna: har appen inte varit öppen finns ingen
 ny session, så resten vid klockan 20 i morgon är hela målet. Därför
@@ -577,7 +581,7 @@ vald, och varje tryck sparas direkt. **Namnet väljs här och inte vid registrer
 Tills dess bär profilen triggerns reserv (e-postens början). Den var åtta, sedan
 fyra steg plus ett kvitto (hälsning, namn, lådan, dagsmål, kvitto). Lådsteget,
 dagsmålet och kvittot togs bort på begäran: målet sätts på Hem (*Set a daily
-goal*), och lådan är nedtonad (`POD_COMING_SOON`). I stället kom
+goal*), och lådan går inte att välja i appen. I stället kom
 [step-social.tsx](components/intro/step-social.tsx) — *Better together*, tre
 block (**Friends / Support / Circle**) som tonar in efter varandra. Varje
 block säger *vad* funktionen är och *varför* den finns; avsikten är det som
@@ -588,8 +592,9 @@ steget och sparar (`finish()`); ett upptaget namn visas där med en uppmaning
 att gå tillbaka.
 
 Lådsteget ([step-box.tsx](components/intro/step-box.tsx)), målsteget och
-kvittot ligger kvar som oanvända filer. **När `POD_COMING_SOON` sätts till
-`false` bör lådsteget tillbaka** — se nästa stycke.
+kvittot ligger kvar som oanvända filer. **När lådorna är ute bör lådsteget
+tillbaka** — se nästa stycke. Det ska då skrivas om helt: det beskriver v7:s
+ritual med tummarna, och lådan startar sin paus själv nu.
 
 Tidigare revs tre steg, och vart och ett hade redan en bättre hemvist:
 
@@ -683,34 +688,33 @@ garanti som gäller även om introduktionen avbryts.
 > **Obs:** [app/onboarding.tsx](app/onboarding.tsx) är **Settings**-skärmen
 > trots filnamnet — den har aldrig varit onboarding och ska inte raderas.
 
-**Lådläget är nedtonat tills lådan finns.** `POD_COMING_SOON` i
-[app/pause.tsx](app/pause.tsx) gör WITH PAUSEPOD otryckbar, dämpar den och
-byter anslutningsraden (`Ready`/`Connect`) mot **COMING SOON**. Allt bakom
-knappen står orört — `sendSetMode`, BLE-kollen, routningen till `/placeinbox`,
-hela `med-låda`-grenen i `handleCheckIn`. Sätt konstanten till `false` och
-läget är tillbaka i exakt samma skick; att det är en konstant och inte en
-bortkommenterad gren är hela avsikten. Knappen **döljs inte**: att lådan finns
-är en del av vad appen är (introduktionens lådsteg står kvar av samma skäl),
-och en knapp som säger varför berättar det, medan en borttagen knapp bara gör
-valskärmen till ett val mellan en sak. Allt som följer nedan beskriver alltså
-protokollet som det är och kommer att vara, inte som det går att nå från
-gränssnittet just nu.
+**Lådläget går inte att välja i appen, och kommer inte att göra det.** WITH
+PAUSEPOD i [app/pause.tsx](app/pause.tsx) är otryckbar, dämpad och säger
+**COMING SOON**. Bakom den finns ingenting: `POD_COMING_SOON`, `sendSetMode`,
+BLE-kollen, routningen till `/placeinbox` och hela `med-låda`-grenen i
+`handleCheckIn` är borta sedan v8.5 (se *v8.5 tog bort appens lådflöde*).
+Konstanten lovade att allt kom tillbaka i exakt samma skick om man släckte
+den, och det löftet går inte att hålla när flödet inte finns.
+
+Knappen **döljs inte**: att lådan finns är en del av vad appen är, och en
+knapp som säger varför berättar det, medan en borttagen knapp bara gör
+valskärmen till ett val mellan en sak. Vägen till lådan går via *How it
+works ›* i Settings ([app/pod.tsx](app/pod.tsx)), och dess status via *Pod
+and Wi-Fi ›* ([app/pod-network.tsx](app/pod-network.tsx)).
 
 **Valskärmen går att stänga av: `SHOW_PAUSE_SETUP_VIEW`** i
-[lib/pauseFlow.ts](lib/pauseFlow.ts) (förval `true`, så att ingen tester ser
-flödet byta form mitt i ett test). Med `false` hålls PAUSE på Hem in och
+[lib/pauseFlow.ts](lib/pauseFlow.ts) (står på `false`). Med `false` hålls
+PAUSE på Hem in och
 startar en lådlös paus direkt, och *I'll take a pause* efter ett stödsvar
 (fem skärmar, alla via `openPauseStart()`) startar den utan att hållas —
 de är redan ett avsiktligt val. Intentionen ställs då bara efteråt (se
 taggarna nedan). Valskärmen står kvar i koden.
 
-- **`startPhonePause()` är en kopia av den lådlösa grenen i `handleCheckIn`**
-  (samma rutt, parametrar och händelse, plus `skipped_setup: true`). Den
-  grenen rördes inte, för app/pause.tsx ändras bara i gest och utseende —
-  ändras den ena måste den andra följa med.
-- **Appens lådväg går inte att nå utan valskärmen**, och det är avsiktligt:
-  `set_mode` skickas därifrån. Lådans egen väg (NFC-taggen, v8) behöver
-  ingen app alls — se protokolldelen.
+- **`startPhonePause()` är en kopia av `handleCheckIn`** (samma rutt,
+  parametrar och händelse, plus `skipped_setup: true`) — ändras den ena måste
+  den andra följa med.
+- **Lådans väg går inte genom appen alls** (NFC-taggen, v8): ingen valskärm,
+  ingen Bluetooth, inget `set_mode` — se protokolldelen.
 - **Finish på pausskärmen hålls också in** ([app/pausing.tsx](app/pausing.tsx),
   båda knapparna — den under klockan och den i *PUT PHONE FACE DOWN*), och den
   är **röd** (`Palette.danger`), inte accent: att avsluta ska inte se ut som
@@ -728,8 +732,7 @@ Hem i lib/pauseFlow.ts) gör knappen till en
 hållet, lätt haptik vid start och fast vid utlösning, *Keep holding* vid ett
 för kort tryck, och knappens `activate`-åtgärd som direkt utlösning för
 skärmläsare och brytarstyrning. Båda grenarna anropar samma `handleCheckIn` —
-gesten är det enda som skiljer, och ingenting i lådvägen (`sendSetMode`,
-routningen till `/placeinbox`) rörs av valet.
+gesten är det enda som skiljer.
 
 **Efter en paus: en ensam paus slutar på Hem.** Sammanfattningen
 ([app/pausesummary.tsx](app/pausesummary.tsx)) lämnar en lapp
@@ -867,17 +870,16 @@ NFC och WiFi, och tumplattorna är borta.
   Bluetooth**: `state` säger `idle` och lockhändelserna skickas inte medan en
   NFC-paus pågår (`phaseName()`, `tellApp` i `handleLid()`), annars hade
   appen hoppat in i sin pausskärm för en paus den inte ska spara.
-- **Appens paus (Bluetooth)**, som i v7: `set_mode` → `phone_down` → locket.
-  Den går till appen som `session_ended` och sparas av
-  [lib/sessionOutbox.ts](lib/sessionOutbox.ts). En sådan paus skickas aldrig
-  över WiFi, och en NFC-paus aldrig över Bluetooth — annars sparades den två
-  gånger.
+- **Appens paus (helt i telefonen)**, [app/pausing.tsx](app/pausing.tsx):
+  skärmen nedåt är locket, och lådan är inte inblandad. Den gick förr genom
+  lådan över Bluetooth (`set_mode` → `phone_down` → locket →
+  `session_ended`), och den vägen finns inte i någon ände längre — varken i
+  firmwaren (v8.5) eller i appen.
 
-**Ett stängt lock på en tom låda startar fortfarande ingenting.** Det som i
-v7 var tummarnas grind är nu taggen: utan en känd tagg i lådan (eller ett
-`set_mode`/`phone_down` från appen) händer ingenting när locket stängs. Bara
-en *stängning* räknas — ett lock som redan var stängt vid start startar
-ingen paus, så en omstart med telefonen i lådan loggar inget.
+**Ett stängt lock på en tom låda startar ingenting.** Det som i v7 var
+tummarnas grind är nu taggen: utan en känd tagg i lådan händer ingenting när
+locket stängs. Bara en *stängning* räknas — ett lock som redan var stängt vid
+start startar ingen paus, så en omstart med telefonen i lådan loggar inget.
 
 ### NFC-pausens väg till databasen
 
@@ -1042,26 +1044,18 @@ Gäller appens pauser; NFC-pauserna har sin egen kö och dedupe på servern.
    NFC-pauserna (samma `nextSeq`), så det blir luckor i appens följd.
 4. **Sluttid = `Date.now() - ageMs`**, inte mottagningstiden.
 
-Status i appen: alla fyra är implementerade. Se
-[context/BLEContext.tsx](context/BLEContext.tsx) (MTU),
-[context/SessionContext.tsx](context/SessionContext.tsx) (acka-efter-lagring,
-`recordedAt = Date.now() - ageMs`),
-[lib/sessionOutbox.ts](lib/sessionOutbox.ts) (dedupe på `boxId`+`seq`).
+**Inget av de fyra gäller appen längre.** De beskrev leveransen av en
+lådsession över Bluetooth, och den finns inte i v8.5: lådan laddar upp sina
+pauser själv över WiFi, och servern dedupar på `(box_id, seq)` i
+`record_box_session()`. `requestMTU(185)` står kvar i
+[context/BLEContext.tsx](context/BLEContext.tsx) — inget meddelande behöver
+den bredden idag, men ett `net:` med ett långt nätnamn kan komma nära, och
+en förhandling som redan är gjord kostar ingenting.
 
 ## Kända firmware-begränsningar (kan inte fixas i appen, bara hanteras)
 
-- **Tyst timeout vid `AWAITING_LID`:** stänger ingen locket inom
-  `AWAIT_LID_MAX_MS` (90 s, räknat från att **CLOSE BOX** visades) går lådan
-  till `idle` utan att skicka något. [app/placeinbox.tsx](app/placeinbox.tsx)
-  speglar gränsen med egna timers (`ABANDON_*`, marginalen `GRACE_MS` efter
-  lådans). **`CHECKING_IN` och dess 30 s finns inte längre** — locket startar
-  pausen direkt. Appens timer för den fasen, och reducerns `checking_in`,
-  är kvar från v7 och ska ses över.
-- **`phone_down` som inkommande meddelande till appen är dödkod:** lådan
-  skickar det aldrig. [lib/bleProtocol.ts](lib/bleProtocol.ts) och
-  [lib/sessionMachine.ts](lib/sessionMachine.ts) har kvar en gren för det.
 - **`MIN_SESSION_MS = 5000`** är ett testvärde (sätt `60000` innan skarp
-  drift). Kortare pauser kastas helt, båda vägarna.
+  drift). Kortare pauser kastas helt.
 
 **v8.5 tog bort appens lådflöde i firmwaren.** Lådan har inte längre
 `AWAITING_LID`, `set_mode`, `phone_down`, `phone_up`, `session_ack`,
@@ -1072,13 +1066,44 @@ lådpaus. `state` säger fortfarande alltid `idle`, med flit: en app som tror
 att pausen är dess egen skulle fastna på pausskärmen i väntan på ett
 `session_ended` som inte finns.
 
-**Appsidan är därför dödkod och ska röjas** — `app/placeinbox.tsx`,
-`lib/sessionOutbox.ts`, lådgrenen i `app/pause.tsx`, låddelen av
-`context/SessionContext.tsx` och `lib/sessionMachine.ts`, lyft-detekteringen
-i `app/_layout.tsx`, och sändarna i `context/BLEContext.tsx`. Ingenting av
-det går att nå i dag (`POD_COMING_SOON`), så det brådskar inte, men det ska
-bort och inte lämnas liggande. `app/pausing.tsx` är den **lådlösa** pausen
-och ska stå kvar.
+**Appsidan är röjd i samma andetag**, och det som försvann är borta och inte
+parkerat — `app/placeinbox.tsx` och `lib/sessionOutbox.ts` är raderade,
+lådgrenen i `app/pause.tsx` likaså, `context/SessionContext.tsx` är bara
+reducern, `lib/sessionMachine.ts` har bara den lådlösa pausens faser
+(`idle`, `active`, `respite`, `ended`), lyft-detekteringen i
+`app/_layout.tsx` är borta tillsammans med dess outbox-tömning och
+återanslutningsrutt, och `context/BLEContext.tsx` har inga sändare och
+ingen meddelandeprenumeration kvar. `app/pausing.tsx` är pausskärmen och
+står kvar; den har bara tappat sina lådgrenar.
+
+Fem följder värda att känna till, så att de inte läses som buggar:
+
+- **`BLEMessageContext` och `useBLE()` finns inte längre.** Allt lådan säger
+  är tillstånd, inte händelser, och tillstånd bor i `useBLEControl()`:
+  `serverBoxId`, `netStatus`, `batteryPercent`. Fanns det en prenumerant
+  skulle den vänta på meddelanden lådan inte skickar.
+- **Parningen i AsyncStorage (`paired_box_id`) är borta.** Den fanns bara
+  för att hindra en främmande låda från att kapa skärmen med sitt `state`,
+  och appen går inte in i någon lådas paus. Lådan säger vem den är vid varje
+  anslutning.
+- **SLEEP-kapseln efter en paus är borta** (`sleepable` i lib/pauseTags.ts
+  och components/pause-tag-sheet.tsx). Den gällde bara en ensam **lådpaus**,
+  och en lådpaus har ingen sammanfattning i appen. Vägen finns kvar där den
+  hör hemma: statistikens kort (`tag_pause_as_sleep`).
+- **`with_pod` skrivs aldrig av appen.** Pausskärmen skriver `false`, och
+  `true` kommer bara ur `record_box_session()` på servern. Fältet är också
+  borta ur händelserna `pause_mode_selected` och `pause_completed`, och
+  `placeinbox_shown` loggas aldrig mer — lådgrenen av
+  `analytics.pause_funnel` (`nadde_lada`) står tom för alltid, inte bara
+  tills lådan går att välja.
+- **`POD_COMING_SOON` är borta ur `app/pause.tsx`.** Konstanten lovade att
+  lådläget kom tillbaka i exakt samma skick om man släckte den, och det
+  löftet går inte att hålla när flödet inte finns. WITH PAUSEPOD-knappen
+  står kvar som ren upplysning.
+
+**Det som återstår på appsidan är nytt, inte återställt:** en skärm *CLOSE
+THE POD TO START*, driven av `ready_to_close`, för den som lägger en olåst
+telefon i lådan.
 
 Protokollet och reglerna för pausposter bor i
 [firmware/pausepod_firmware_v8/PAUSPOST_KONTRAKT.md](firmware/pausepod_firmware_v8/PAUSPOST_KONTRAKT.md).
@@ -1087,15 +1112,18 @@ Protokollet och reglerna för pausposter bor i
 
 - [context/BLEContext.tsx](context/BLEContext.tsx) — BLE-anslutning
   (singleton `BleManager`, ansluter en gång vid appstart, kopplas aldrig ner
-  vid backgrounding) + rå meddelandekodning/avkodning.
+  vid backgrounding) och allt lådan säger om sig själv. Appen skickar
+  ingenting: den lyssnar.
 - [lib/bleProtocol.ts](lib/bleProtocol.ts) — enda platsen som känner till
   exakt textformat för varje meddelande.
-- [context/SessionContext.tsx](context/SessionContext.tsx) — enda platsen
-  som matar [lib/sessionMachine.ts](lib/sessionMachine.ts)s reducer från
-  lådflödet. Det lådlösa flödet dispatchar manuellt från
-  [app/pausing.tsx](app/pausing.tsx).
-- [lib/sessionOutbox.ts](lib/sessionOutbox.ts) — beständig lokal kö för
-  avslutade lådsessioner, idempotent på `(boxId, seq)`.
+- [context/SessionContext.tsx](context/SessionContext.tsx) — håller den
+  pågående pausens tillstånd ([lib/sessionMachine.ts](lib/sessionMachine.ts))
+  så att det överlever ett skärmbyte. [app/pausing.tsx](app/pausing.tsx)
+  dispatchar, `app/_layout.tsx` läser `phase === 'ended'`.
+- [app/pod-network.tsx](app/pod-network.tsx) — lådans nätverksstatus, nådd
+  via *Pod and Wi-Fi ›* i Settings. Den säger aldrig något den inte vet och
+  aldrig *varför* wifi inte fungerar; den är också hemvisten för
+  wifi-uppgifter över Bluetooth när den byggs.
 - [lib/notifications.ts](lib/notifications.ts) — enda stället som rör
   notis-API:et: den lokala dagspåminnelsen, push-token, Android-kanalerna och
   vad som händer när en push landar eller trycks på. Se notisavsnittet högst
@@ -1148,14 +1176,13 @@ Protokollet och reglerna för pausposter bor i
   telefonen nedåt, lås, vänd upp och lås upp så går klockan medan man
   scrollar. Riktig spärr kräver Screen Time (iOS) respektive
   `startLockTask()` (Android) — det är den gränsen lådan finns för.
-- [app/placeinbox.tsx](app/placeinbox.tsx) — `standing`/`phonedown`-ritualen
-  fram till locket stängs, plus `abandoned` när lådan tystnat (se de tysta
-  timeouterna ovan). Lutningsdetektering via [lib/tilt.ts](lib/tilt.ts)
-  (gravitationsvektor, inte `rotation.beta/gamma` — se motivering i filen).
-  **`phonedown`-vyn nämner fortfarande tummarna**, och det är fel sedan v8:
-  locket startar pausen direkt. Skärmen, väntan i `checking_in` och
-  reducerns tumgrenar ([lib/sessionMachine.ts](lib/sessionMachine.ts)) är
-  kvar från v7 och ska ses över innan `POD_COMING_SOON` slås av.
+- ~~`app/placeinbox.tsx`~~ — `standing`/`phonedown`-ritualen fram till
+  locket stängs, plus `abandoned` när lådan tystnat. **Raderad** med appens
+  lådflöde (v8.5). Lutningsdetekteringen i [lib/tilt.ts](lib/tilt.ts) står
+  kvar för pausskärmen, men bara `isFaceDown()` — `tiltDegrees()` hade bara
+  den här skärmen och lyft-detekteringen som läsare och är borta.
+  Beskrivningen nedan gäller den raderade skärmen, och sparas eftersom
+  avvägningarna gäller igen om en lådritual någon gång byggs i appen.
   - **Steget går åt båda håll:** reses telefonen upp igen (≥ 45° i 0,5 s) går
     vyn tillbaka till `standing`, för instruktionen ska alltid stämma med var
     telefonen faktiskt är. Glappet mot nedläggningens 8° är hysteresen — utan
@@ -1177,10 +1204,10 @@ Protokollet och reglerna för pausposter bor i
     inga andra: startade den om vid varje vippning kunde skärmen stå kvar
     minuter efter att lådan gått till loggan, och nöjde den sig med ett fast
     ankare skulle den ge upp medan lådan fortfarande väntade.
-- [app/_layout.tsx](app/_layout.tsx) — global routing vid återanslutning,
-  global `phase === 'ended'` → reset + navigering till `/pausesummary`
-  (oavsett monterad skärm), global tillståndsbaserad lyft-detektering
-  (`phone_up`) medan en box-session pågår.
+- [app/_layout.tsx](app/_layout.tsx) — global `phase === 'ended'` → reset +
+  navigering till `/pausesummary`, oavsett monterad skärm, plus
+  krasch-återställningen. Routningen vid återanslutning och lyft-detekteringen
+  (`phone_up`) är borta med lådflödet.
   **En dagpaus som dog sparas till sista pulsen, och ingen frågar** (november
   2026). En fråga om när telefonen lyftes byggdes och togs bort på begäran:
   utan spärr gick den att fuska med (svep bort appen, välj en sen tid), och
@@ -1256,10 +1283,10 @@ namn är taget, och ingenting annat: inga rader, inga id:n, ingen lista.
 
 ## Statistik — två källor, bara en av dem retroaktiv
 
-**Paustiden har alltid funnits.** `pause_sessions` skrivs från tre ställen
-(det lådlösa flödet i [app/pausing.tsx](app/pausing.tsx), lådflödets
-[lib/sessionOutbox.ts](lib/sessionOutbox.ts), och krasch-återställningen i
-[app/_layout.tsx](app/_layout.tsx)) och har gjort det sedan början. Hur ofta
+**Paustiden har alltid funnits.** `pause_sessions` skrivs från pausskärmen
+([app/pausing.tsx](app/pausing.tsx)), krasch-återställningen
+([app/_layout.tsx](app/_layout.tsx)) och — sedan v8.5 — lådans egen
+`box-session` på servern, och har gjort det sedan början. Hur ofta
 någon pausar och hur länge går alltså att läsa bakåt i tiden utan att något
 behöver byggas — [supabase/analytics.sql](supabase/analytics.sql) är bara
 vyer över rader som redan ligger där.
@@ -1342,11 +1369,13 @@ ingen cron i projektet, samma linje som `evaluate_circle_goals()`. Händelser
 växer snabbare än allt annat i databasen; en aktiv användare lägger lätt
 hundra rader om dagen bara i skärmvisningar.
 
-> **Obs:** lådläget är avstängt i appen idag (`POD_COMING_SOON` i
-> [app/pause.tsx](app/pause.tsx)), så `box_*`-händelserna och
-> lådgrenen av `analytics.pause_funnel` står tomma tills den konstanten
-> sätts till `false`. Vyerna är ändå på plats — de ska finnas den dagen
-> lådan går att välja, inte byggas då.
+> **Obs:** appen startar aldrig en lådpaus, så lådgrenen av
+> `analytics.pause_funnel` (`nadde_lada`, ur `placeinbox_shown`) står tom
+> **för alltid** och inte bara tills lådan går att välja. `box_*`-händelserna
+> lever däremot: de räknar Bluetooth-anslutningar till lådan, som finns kvar
+> för nätverksstatussidan. Lådans pauser syns i `pause_sessions`
+> (`source = 'nfc'`), inte i händelseloggen — lådan skriver dem själv och
+> passerar aldrig `lib/analytics.ts`.
 
 ## Stödsvaren — fyra medier, två kanaler
 
@@ -2025,7 +2054,7 @@ bara tre av dem är flikar. Resten ärver rummet från vad de *handlar om*:
 
 | Rum | Skärmar utöver fliken |
 |---|---|
-| `pause` | `pause`, `placeinbox`, `pausesummary` |
+| `pause` | `pause`, `pod`, `pod-network`, `pausesummary` |
 | `circle` | `circle-chat`, `circle-create`, `circle-invite`, `circle-welcome` |
 | `friends` | `add-friend`, `support-story-create`, `support-view-text`, `support-respond-text`, `support-respond-voice`, `text-message`, `support-arrived`, `voice` |
 | `study` | `stats`, `onboarding` (Settings), `profile` — ingen flik alls |
@@ -3073,13 +3102,13 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
   aldrig färdig engelsk text — texten byggs client-side av
   `formatActivity()` i [lib/circles.ts](lib/circles.ts), samma princip som
   `my-wrapped.tsx`/`friend-wrapped.tsx` redan använder för sin statistik.
-  `recordPauseInCircle()` i samma fil anropas efter varje avslutad paus
-  (både det lådlösa flödet i `app/pausing.tsx` och lådflödets
-  `lib/sessionOutbox.ts`) och no-opar tyst om användaren inte är med i
+  `recordPauseInCircle()` i samma fil anropas efter varje avslutad paus i
+  appen (`app/pausing.tsx`) och no-opar tyst om användaren inte är med i
   någon cirkel. Den skickar bara sessionens id — RPC:n läser längd och
   sluttid ur `pause_sessions` själv, så ingen kan skriva in timmar som inte
   finns i den egna loggen, och dedupen på `session_id` gör den ofarlig att
-  anropa om när outboxen skickar om en köad låd-session.
+  anropa om. Lådans pauser går inte genom appen: `record_box_session()` på
+  servern anropar `record_circle_pause` själv.
   - **Tio rader, sedan en utfällning.** `load()` hämtar 50 rader men flödet
     visar `ACTIVITY_PREVIEW` (10) tills man trycker *Show more*. Foten är
     samma `panelFoot` som veckopanelens *See everyone* — två utfällningar på

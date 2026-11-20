@@ -28,9 +28,9 @@ import { supabase } from '../lib/supabase';
  * ([components/intro/step-box.tsx](../components/intro/step-box.tsx)), men
  * för v8: taggen och locket, inga tummar.
  *
- * **Bara NFC-pausen visas.** Appens lådväg (`set_mode`, `phone_down`) går
- * bara att nå från valskärmen, som är avstängd, och två sätt att starta samma
- * sak hade gjort berättelsen dubbelt så lång.
+ * **Bara NFC-pausen finns.** Appens lådväg är riven (firmware v8.5 och
+ * röjningen i appen): lådan äger sin paus hela vägen, så det finns bara ett
+ * sätt att starta den och bara en berättelse att visa.
  *
  * Inställningen följer firmwaren: utan känt nät visar lådan **NO WIFI ·
  * SCAN TO SET UP**, startar ett eget öppet nät och öppnar en sida där man

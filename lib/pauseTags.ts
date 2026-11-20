@@ -40,12 +40,6 @@ export type PendingPauseTag = {
   alreadyTagged: boolean;
   /** Ska Hem ringa? Nej om sammanfattningen redan gjort det. */
   bell: boolean;
-  /**
-   * En ensam lådpaus får *Sleep* bland taggarna. En telefonpaus får det
-   * inte — en natt utan låda startas med SLEEP i nattläget — och en delad
-   * paus kan inte bli en natt.
-   */
-  sleepable: boolean;
   at: number;
 };
 
@@ -53,8 +47,14 @@ export type PendingPauseTag = {
 const PENDING_MAX_AGE_MS = 10 * 60 * 1000;
 let pending: PendingPauseTag | null = null;
 
-export function setPendingPauseTag(durationSeconds: number, alreadyTagged: boolean, bell = true, sleepable = false) {
-  pending = { durationSeconds, alreadyTagged, bell, sleepable, at: Date.now() };
+// `sleepable` stod här som fjärde argument: en ensam **lådpaus** fick
+// *Sleep* bland taggarna på Hem. Den vägen fanns bara så länge appen själv
+// startade lådpauser — nu laddar lådan upp sina pauser över WiFi och de
+// syns först i statistiken, där SLEEP-kapseln sitter kvar och gör samma sak
+// (lib/sleep.ts, `tag_pause_as_sleep`). En natt utan låda startas med SLEEP
+// i nattläget, så kortet efter en paus har inget att erbjuda där.
+export function setPendingPauseTag(durationSeconds: number, alreadyTagged: boolean, bell = true) {
+  pending = { durationSeconds, alreadyTagged, bell, at: Date.now() };
 }
 
 /** Lappen, en gång. Nästa anrop svarar `null`. */

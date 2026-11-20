@@ -10,8 +10,7 @@ import { deleteDoc } from './docStore';
  * pausskärmen läser kategorierna rakt ur filerna.
  *
  * Kvar står det som är enhetens: temat, händelsekön (töms av sig själv, se
- * lib/analytics.ts), lådans session-kö (sessionOutbox — en olevererad paus
- * får inte försvinna) och pausens checkpoint (bär sitt eget `userId`).
+ * lib/analytics.ts) och pausens checkpoint (bär sitt eget `userId`).
  *
  * Intentionerna är inte borta efter en utloggning: filerna är bara en cache
  * av `user_intentions`, och hämtas ner igen vid inloggning

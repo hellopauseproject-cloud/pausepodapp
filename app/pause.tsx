@@ -1,8 +1,7 @@
 import { FontAwesome, MaterialIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useBLE, useBLEControl } from '../context/BLEContext';
+import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { HoldToStartButton } from '../components/hold-to-start-button';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { AppPalette, Radius, Spacing } from '../constants/appTheme';
@@ -11,32 +10,37 @@ import { track } from '../lib/analytics';
 import { HOLD_TO_START_MS } from '../lib/pauseFlow';
 import { Category, getSelectedCategories } from './pauseLogger';
 
-type PauseMode = 'med-låda' | 'utan-låda' | null;
-
 /**
- * Lådan är inte ute ännu, så dess läge går inte att välja.
+ * Bara det lådlösa läget går att välja, och **det är inte längre ett
+ * tillfälligt tillstånd bakom en konstant**. Sedan firmware v8.5 startar
+ * appen aldrig en lådpaus: lådan äger sin paus hela vägen (taggen, locket,
+ * uppladdningen över WiFi) och behöver ingen app alls. Grenen som skickade
+ * `set_mode` och routade till `/placeinbox` är därför borta, inte parkerad —
+ * det fanns en `POD_COMING_SOON` som lovade att allt kom tillbaka i exakt
+ * samma skick, och det löftet går inte att hålla när flödet inte finns.
+ * Vill man ha ett lådflöde i appen är det en ny funktion, och frågan att
+ * svara på först är varför appen ska lägga sig i en paus lådan klarar själv.
  *
- * **Allt bakom knappen står kvar orört** — `sendSetMode`, BLE-kollen,
- * routningen till `/placeinbox`, hela `med-låda`-grenen i `handleCheckIn`.
- * Det enda som ändras är att knappen inte går att trycka på och att den säger
- * varför. Sätt den här till `false` och lådläget är tillbaka i exakt samma
- * skick som förut; det är hela avsikten med att det är en konstant och inte
- * en bortkommenterad gren.
+ * WITH PAUSEPOD-knappen står kvar, otryckbar och med COMING SOON. Att lådan
+ * finns är en del av vad appen är, och en knapp som säger varför berättar
+ * det, medan en borttagen knapp bara gör valskärmen till ett val mellan en
+ * sak. Vägen till lådan går via *How it works ›* i Settings
+ * ([app/pod.tsx](pod.tsx)).
  *
- * Knappen döljs alltså inte heller. Att lådan finns är en del av vad appen
- * är — introduktionens lådsteg står kvar av samma skäl — och en knapp som
- * säger COMING SOON berättar det, medan en borttagen knapp bara gör
- * valskärmen till ett val mellan en sak.
+ * Det som återstår att bygga när lådorna är ute är en annan skärm än den
+ * här: *CLOSE THE POD TO START*, driven av `ready_to_close` över Bluetooth
+ * (se lib/bleProtocol.ts) — en upplysning om att pausen inte börjat än, inte
+ * ett flöde appen styr.
  */
-const POD_COMING_SOON = true;
+type PauseMode = 'utan-låda' | null;
 
 /**
  * CHECK IN måste hållas in i `HOLD_TO_START_MS` innan pausen startar. Ett
  * startat tryck är det enda i appen som sätter igång något man inte ångrar
  * med ett tryck till, och ett avsiktligt håll skiljer det från ett snuddat.
  * `false` ger tillbaka det vanliga trycket — båda vägarna anropar samma
- * `handleCheckIn`, och ingenting i den (BLE, `set_mode`, routningen) rörs av
- * valet. Se components/hold-to-start-button.tsx.
+ * `handleCheckIn`, och ingenting i den rörs av valet. Se
+ * components/hold-to-start-button.tsx.
  */
 const HOLD_TO_START = true;
 // Hålltiden bor i lib/pauseFlow.ts, delad med PAUSE på Hem.
@@ -76,18 +80,13 @@ function PauseScreen() {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  // Med lådan utom räckhåll är "utan låda" inte ett val längre utan det enda
-  // läget, och då ska skärmen inte kräva ett tryck för att komma igång: CHECK IN
-  // står annars död tills man valt det som ändå var givet.
-  //
-  // Förvalet hänger därför på POD_COMING_SOON och är inte skrivet rakt ut. Släcks
-  // konstanten är båda lägena valbara igen, och då måste skärmen vara neutral — ett
-  // förval på det ena hade gjort valet till en knuff, och konstantens löfte om att
-  // allt är tillbaka i exakt samma skick hade brutits här utan att något felar.
-  const [selectedMode, setSelectedMode] = useState<PauseMode>(POD_COMING_SOON ? 'utan-låda' : null);
+  // "Utan låda" är inte ett val längre utan det enda läget, så det är valt
+  // från början: CHECK IN står annars död tills man tryckt på det som ändå
+  // var givet. Ett tryck på knappen avmarkerar fortfarande, och det är med
+  // flit — den som öppnat valskärmen och ändrat sig ska kunna backa ur utan
+  // att gå tillbaka, och CHECK IN säger då att inget läge är valt.
+  const [selectedMode, setSelectedMode] = useState<PauseMode>('utan-låda');
   const [showHelpModal, setShowHelpModal] = useState(false);
-  const { isConnected } = useBLEControl();
-  const { sendSetMode } = useBLE();
 
   // Tom lista betyder "medvetet tömd i Settings" och inte "aldrig vald" —
   // standardgrenen sitter i getSelectedCategories() och ger hela
@@ -101,52 +100,17 @@ function PauseScreen() {
   const handleCheckIn = () => {
     if (!canCheckIn) return;
 
-    if (selectedMode === 'med-låda' && !isConnected) {
-      // Trattens första bortfall, och det enda som inte lämnar något spår
-      // alls i pause_sessions: hen ville pausa med lådan och kom aldrig
-      // längre än till varningen.
-      track('pause_blocked_box_offline', { category: selectedCategory ?? null });
-      Alert.alert(
-        'PAUSEPOD not connected',
-        'Check that Bluetooth is turned on on your phone and that the box is within range.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    // Trattens ingång. `with_pod` är hela skälet att händelsen finns: de två
-    // flödena faller ifrån på helt olika ställen, och i pause_sessions syns
-    // bara de försök som faktiskt blev en paus.
+    // Trattens ingång: i pause_sessions syns bara de försök som faktiskt
+    // blev en paus. Fältet `with_pod` är borta — appens paus är alltid
+    // telefonens egen, och lådans pauser passerar aldrig den här skärmen.
     track('pause_mode_selected', {
-      with_pod: selectedMode === 'med-låda',
       category: selectedCategory ?? null,
       shared: !!(sharedSessionId && sharedWithName),
     });
 
-    if (selectedMode === 'med-låda') {
-      // Ingen vald längd med låda ännu — UP:0 tills en längdväljare finns.
-      // Lådan parsar inte innehållet idag, men formatet ligger på plats.
-      sendSetMode('session', 'UP', 0).catch(() => {});
-
-      const base = {
-        mode: 'session',
-        category: selectedCategory ?? '',
-        withPod: 'true',
-        pauseType: 'session',
-        targetSeconds: '0',
-      };
-      if (sharedSessionId && sharedWithName) {
-        router.push({ pathname: '/pausing', params: { ...base, sharedSessionId, sharedWithName } });
-      } else {
-        router.push({ pathname: '/placeinbox', params: base });
-      }
-      return;
-    }
-
     const base = {
       mode: 'session',
       category: selectedCategory ?? '',
-      withPod: 'false',
       pauseType: 'session',
       targetSeconds: '0',
     };
@@ -167,54 +131,22 @@ function PauseScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>CHOOSE MODE</Text>
         <View style={styles.modeRow}>
-          <TouchableOpacity
-            style={[
-              styles.modeButton,
-              selectedMode === 'med-låda' && styles.modeButtonSelected,
-              POD_COMING_SOON && styles.modeButtonSoon,
-            ]}
-            disabled={POD_COMING_SOON}
-            accessibilityState={{ disabled: POD_COMING_SOON }}
-            onPress={() => setSelectedMode(selectedMode === 'med-låda' ? null : 'med-låda')}
+          {/* Lådans knapp är ren upplysning: den går inte att välja, och
+              anslutningsraden ("Ready"/"Connect") är borta med lådflödet —
+              "Connect" hade varit en uppmaning att göra något som inte leder
+              någonstans. Den säger skälet i stället för att stå tom: en
+              nedtonad knapp utan förklaring läser som trasig. */}
+          <View
+            style={[styles.modeButton, styles.modeButtonSoon]}
+            accessible
+            accessibilityLabel="With PausePod, coming soon"
           >
-            <MaterialIcons
-              name="pause-presentation"
-              size={38}
-              color={
-                POD_COMING_SOON
-                  ? Palette.textDisabled
-                  : selectedMode === 'med-låda' ? Palette.hue : Palette.textFaint
-              }
-            />
-            <Text
-              style={[
-                styles.modeTitle,
-                selectedMode === 'med-låda' && styles.modeTitleSelected,
-                POD_COMING_SOON && styles.modeTitleSoon,
-              ]}
-            >
-              WITH PAUSEPOD
-            </Text>
-            {/* Anslutningsraden säger ingenting medan läget inte går att
-                välja — "Connect" hade varit en uppmaning att göra något som
-                inte leder någonstans. Den byts mot skälet, inte mot tomrum:
-                en nedtonad knapp utan förklaring läser som trasig. */}
-            {POD_COMING_SOON ? (
-              <View style={styles.bleRow}>
-                <Text style={styles.soonText}>COMING SOON</Text>
-              </View>
-            ) : (
-              <View style={[styles.bleRow, { opacity: selectedMode === 'med-låda' ? 1 : 0.3 }]}>
-                <View style={[styles.bleDot, { backgroundColor: isConnected ? Palette.success : Palette.textPrimary }]} />
-                <Text style={styles.bleSmallText}>{isConnected ? 'Ready' : 'Connect'}</Text>
-              </View>
-            )}
-            {selectedMode === 'med-låda' && !POD_COMING_SOON && (
-              <View style={styles.checkDot}>
-                <FontAwesome name="check" size={10} color={Palette.onAccent} />
-              </View>
-            )}
-          </TouchableOpacity>
+            <MaterialIcons name="pause-presentation" size={38} color={Palette.textDisabled} />
+            <Text style={[styles.modeTitle, styles.modeTitleSoon]}>WITH PAUSEPOD</Text>
+            <View style={styles.bleRow}>
+              <Text style={styles.soonText}>COMING SOON</Text>
+            </View>
+          </View>
 
           <TouchableOpacity
             style={[styles.modeButton, selectedMode === 'utan-låda' && styles.modeButtonSelected]}
@@ -420,7 +352,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     justifyContent: 'center',
   },
   bleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  bleDot: { width: 7, height: 7, borderRadius: 4 },
   bleSmallText: {
     color: Palette.textSecondary,
     fontSize: 12,

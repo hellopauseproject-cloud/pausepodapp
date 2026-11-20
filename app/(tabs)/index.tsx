@@ -1066,9 +1066,7 @@ function HomeScreen() {
         <Reanimated.View style={[styles.tagSheetWrap, tagSheetStyle]}>
           <PauseTagSheet
             durationSeconds={tag.durationSeconds}
-            sleepable={tag.sleepable}
             onClose={closeTag}
-            onSlept={() => { loadDaily().catch(() => {}); }}
             onHeight={h => setTagSheetH(prev => (Math.abs(prev - h) > 1 ? h : prev))}
             bottomPadding={Spacing.lg}
           />

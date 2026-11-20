@@ -8,7 +8,7 @@
 // och appen beter sig precis som den gör i telefonen när ingen låda är i
 // närheten — vilket är exakt det läget man vill granska UI:t i.
 //
-// Konsekvensen är att lådflödet inte går att testa på webben. Det är ingen
+// Konsekvensen är att lådans anslutning inte går att testa på webben. Det är ingen
 // brist i stubben: en webbläsare har ingen låda, ingen accelerometer och
 // ingen Bluetooth-stack att erbjuda.
 
@@ -16,7 +16,7 @@ let warned = false;
 function warnOnce() {
   if (warned) return;
   warned = true;
-  console.log('BLE: ingen Bluetooth på webben — lådflödet är avstängt i den här vyn.');
+  console.log('BLE: ingen Bluetooth på webben — lådan går inte att nå i den här vyn.');
 }
 
 type StateListener = (state: string) => void;
