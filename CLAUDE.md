@@ -1253,6 +1253,23 @@ Protokollet och reglerna för pausposter bor i
   gör bucketen privat och körs **först när alla har en app med
   signeringen** — en äldre app spelar annars inte upp någonting.
 
+### Inloggningen: e-post, Google, och Apple på iOS
+
+**Sign in with Apple finns på inloggningen och registreringen, bara på iOS**
+(november 2026): Apple kräver den (guideline 4.8) när Google erbjuds.
+Native, genom `expo-apple-authentication` och
+`supabase.auth.signInWithIdToken` ([lib/appleAuth.ts](lib/appleAuth.ts)) —
+ingen webbläsare, till skillnad från Google. Knappen är Apples egen
+([components/apple-sign-in-button.tsx](components/apple-sign-in-button.tsx)),
+inte en ritad: Apple granskar utseendet. Kräver Apple-leverantören i
+Supabase med bundle-id:t som Client ID.
+
+**Android-paketet heter `com.pausepod.app`**, samma som appen i Play
+Console (ett paketnamn går aldrig att byta där). iOS bundle-id:t är
+fortfarande `com.pauseprojectmaja.Pauseapp`, och de två behöver inte vara
+lika. `google-services.json` måste vara Firebase-filen för
+`com.pausepod.app`, annars faller Android-bygget.
+
 ### Radera kontot
 
 **Längst ner i profilen, under *Log out*** (november 2026, krav från App

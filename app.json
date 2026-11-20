@@ -21,7 +21,8 @@
         "ITSAppUsesNonExemptEncryption": false
       },
       "deploymentTarget": "16.0",
-      "bundleIdentifier": "com.pauseprojectmaja.Pauseapp"
+      "bundleIdentifier": "com.pauseprojectmaja.Pauseapp",
+      "usesAppleSignIn": true
     },
     "android": {
       "intentFilters": [
@@ -62,7 +63,7 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.pauseprojectmaja.Pauseapp",
+      "package": "com.pausepod.app",
       "googleServicesFile": "./google-services.json"
     },
     "web": {
@@ -91,7 +92,7 @@
             "peripheral",
             "central"
           ],
-          "bluetoothAlwaysPermission": "Allow $(BUNDLE_ID) to connect to bluetooth devices"
+          "bluetoothAlwaysPermission": "PausePod uses Bluetooth to connect to your Pod."
         }
       ],
       "expo-audio",
@@ -116,7 +117,16 @@
           "microphonePermission": "PausePod needs the microphone so you can send friends voice and video support.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PausePod uses your photos so you can choose a profile picture and send photo support to friends.",
+          "cameraPermission": "PausePod needs the camera so you can send friends video and photo support.",
+          "microphonePermission": "PausePod needs the microphone so you can send friends voice and video support."
+        }
+      ],
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true,

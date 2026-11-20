@@ -15,6 +15,8 @@ import { AppPalette, Radius, Spacing } from '../../constants/appTheme';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePalette } from '../../contexts/ThemeContext';
 import { signInWithGoogle } from '../../lib/googleAuth';
+import { signInWithApple } from '../../lib/appleAuth';
+import { AppleSignInButton } from '../../components/apple-sign-in-button';
 import DismissKeyboardView from '../components/DismissKeyboardView';
 import { PausePodLogo } from '../../components/pause-pod-logo';
 
@@ -28,6 +30,8 @@ export default function SignUpScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+  const busy = loading || googleLoading || appleLoading;
   const [done, setDone] = useState(false);
 
   const shakeAnim = useRef(new Animated.Value(0)).current;
@@ -79,6 +83,18 @@ export default function SignUpScreen() {
     setError('');
     const { error: err } = await signInWithGoogle();
     setGoogleLoading(false);
+    if (err) {
+      setError(err);
+      shake();
+    }
+    // Vid framgång hanteras navigation av auth-gate i _layout.tsx
+  };
+
+  const handleAppleSignIn = async () => {
+    setAppleLoading(true);
+    setError('');
+    const { error: err } = await signInWithApple();
+    setAppleLoading(false);
     if (err) {
       setError(err);
       shake();
@@ -163,7 +179,7 @@ export default function SignUpScreen() {
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleSignUp}
-          disabled={loading || googleLoading}
+          disabled={busy}
           activeOpacity={0.85}
         >
           <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Create account'}</Text>
@@ -175,10 +191,12 @@ export default function SignUpScreen() {
           <View style={styles.dividerLine} />
         </View>
 
+        <AppleSignInButton onPress={handleAppleSignIn} disabled={busy} type="signUp" />
+
         <TouchableOpacity
           style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
           onPress={handleGoogleSignIn}
-          disabled={loading || googleLoading}
+          disabled={busy}
           activeOpacity={0.85}
         >
           <Text style={styles.googleG}>G</Text>

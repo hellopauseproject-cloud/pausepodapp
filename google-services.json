@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:57600969786:android:4a81fa8456551a35297903",
+        "android_client_info": {
+          "package_name": "com.pausepod.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD5tG3Q8ETgSikxGVz6r4sBN_tiUYszKJ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:57600969786:android:422da7e794eb7a6c297903",
         "android_client_info": {
           "package_name": "com.pauseprojectmaja.Pauseapp"
