@@ -95,7 +95,10 @@ function PodNetworkScreen() {
     old:     { word: 'NEARBY',     line: 'Older firmware.' },
     nowifi:  { word: 'NO WI-FI',   line: '' },
     offline: { word: 'NO SIGNAL',  line: "Pauses go up when it's back." },
-    good:    { word: 'ALL GOOD',   line: '' },
+    // CONNECTED, samma ord som lådans egen display säger när nätet kommer
+    // upp (se renderers i .ino och *Set it up* i app/pod.tsx). Att appen och
+    // lådan säger samma sak om samma sak är värt mer än ett käckare ord.
+    good:    { word: 'CONNECTED',  line: '' },
   }[state];
 
   const loud = state === 'nowifi' || state === 'offline';
