@@ -74,10 +74,11 @@ function ProfileScreen() {
     if (deleteCount === 0) {
       setDeleteStep('deleting');
       deletingRef.current = true;
-      deleteAccount().then(({ error }) => {
-        if (!error) return;
+      deleteAccount().then(({ error, canceled }) => {
+        if (!error && !canceled) return;
         deletingRef.current = false;
-        setDeleteStep('error');
+        // Stängde man Apples ark är det samma sak som Cancel.
+        setDeleteStep(canceled ? null : 'error');
       });
       return;
     }

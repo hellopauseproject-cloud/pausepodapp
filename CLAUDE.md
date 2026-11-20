@@ -1292,6 +1292,12 @@ till inloggningen. `deleteAccount` i [contexts/AuthContext.tsx](contexts/AuthCon
   den i funktionen.
 - Kön i lib/analytics.ts töms på kontots rader (`forgetAnalyticsUser`), annars
   stoppar de kön för nästa konto på telefonen.
+- **Apple-kopplingen återkallas först**, för konton som loggat in med Apple
+  (Apples krav): Apples ark visas en gång till för en färsk engångskod, och
+  edge-funktionen `revoke-apple` byter den mot en token och återkallar den
+  med nyckeln i Supabase-hemligheterna (`APPLE_*`). Stängs arket raderas
+  ingenting. Misslyckas återkallelsen raderas kontot ändå
+  (`apple_revoke_failed`).
 
 ### Användarnamn är unika, skiftlägesokänsligt
 

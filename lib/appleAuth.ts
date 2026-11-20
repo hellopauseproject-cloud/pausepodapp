@@ -1,3 +1,4 @@
+import type { User } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
@@ -17,6 +18,36 @@ export async function isAppleSignInAvailable(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Har kontot loggat in med Apple någon gång? */
+export function usesAppleSignIn(user: User | null): boolean {
+  if (!user) return false;
+  const providers = (user.app_metadata?.providers as string[] | undefined) ?? [];
+  return providers.includes('apple') || !!user.identities?.some(i => i.provider === 'apple');
+}
+
+/**
+ * Tar bort kopplingen till Apple-ID:t inför en kontoradering (Apples krav,
+ * se supabase/functions/revoke-apple). Apples ark visas en gång till, för
+ * det är bara där en färsk engångskod går att få. `canceled` betyder att
+ * användaren stängde arket — då raderas ingenting.
+ */
+export async function revokeAppleSignIn(): Promise<'revoked' | 'canceled' | 'failed'> {
+  let code: string | null = null;
+  try {
+    const credential = await AppleAuthentication.signInAsync({ requestedScopes: [] });
+    code = credential.authorizationCode;
+  } catch (e) {
+    if ((e as { code?: string })?.code === 'ERR_REQUEST_CANCELED') return 'canceled';
+    return 'failed';
+  }
+  if (!code) return 'failed';
+
+  const { error } = await supabase.functions.invoke('revoke-apple', {
+    body: { authorization_code: code },
+  });
+  return error ? 'failed' : 'revoked';
 }
 
 export async function signInWithApple(): Promise<{ error: string | null }> {

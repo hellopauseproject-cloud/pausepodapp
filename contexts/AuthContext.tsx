@@ -1,6 +1,8 @@
 import { Session, User } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { flush, forgetAnalyticsUser, setAnalyticsUser, track } from '../lib/analytics';
+import { revokeAppleSignIn, usesAppleSignIn } from '../lib/appleAuth';
 import { syncIntentions } from '../app/pauseLogger';
 import { clearLocalAccountData } from '../lib/localAccountData';
 import { clearPushToken } from '../lib/notifications';
@@ -16,7 +18,8 @@ type AuthContextType = {
   signUp: (email: string, password: string, username?: string) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  deleteAccount: () => Promise<{ error: string | null }>;
+  /** `canceled`: Apples ark stängdes, och ingenting raderades. */
+  deleteAccount: () => Promise<{ error: string | null; canceled?: boolean }>;
 };
 
 // Buckets där användaren laddat upp under `<user_id>/`. Delete-policyerna
@@ -268,9 +271,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Raderar kontot för gott (supabase/delete_account.sql). Profilraden och
   // därmed push-token försvinner med kontot, så clearPushToken behövs inte.
   // När `user` blir null skickar grinden i app/_layout.tsx till inloggningen.
-  const deleteAccount = async (): Promise<{ error: string | null }> => {
+  const deleteAccount = async (): Promise<{ error: string | null; canceled?: boolean }> => {
     const userId = user?.id;
     if (!userId) return { error: 'Not signed in.' };
+
+    // Apple-kopplingen först, medan kontot finns. Går den inte (nätet,
+    // hemligheterna) raderas kontot ändå: att radera datan väger tyngre, och
+    // händelsen visar hur ofta det händer.
+    if (Platform.OS === 'ios' && usesAppleSignIn(user)) {
+      const revoked = await revokeAppleSignIn();
+      if (revoked === 'canceled') return { error: null, canceled: true };
+      if (revoked === 'failed') track('apple_revoke_failed');
+    }
 
     track('account_delete_started');
     // Kön skickas medan kontot finns; raderna blir anonyma när det raderas.
