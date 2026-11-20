@@ -1,7 +1,8 @@
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { AppPalette, Radius, Spacing, alpha, darkPalette, lightPalette } from '../constants/appTheme';
 import { RoomProvider, ThemePreference, usePalette, useTheme } from '../contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,6 +11,122 @@ import { roomShell, ScreenBackground } from '../components/screen-background';
 import { track } from '../lib/analytics';
 import { fetchMyTags, formatTagUid, type MyTag, removeMyTag } from '../lib/tagPairing';
 import DismissKeyboardView from './components/DismissKeyboardView';
+
+/** Lådan går inte att köpa än: PausePod-rutan visar en försmak i stället för
+ *  inställningarna (taggar, Wi-Fi), under rubriken COMING SOON. `false` ger
+ *  tillbaka rutan som den var. En falsk oskärpa över inställningarna prövades
+ *  och föll: den var ful. */
+const POD_COMING_SOON = true;
+
+// Ribbonens toner, samma som Global Pause-raden (components/global-pause-line.tsx),
+// och dess mörka navy som text. Inte palettstyrda: ribbonen ser likadan ut i
+// båda lägena.
+const RIBBON = ['#8CC4FF', '#7FE0B0', '#FFB77D'] as const;
+const RIBBON_INK = '#0A1330';
+const WAITLIST_H = 30;
+const WAITLIST_URL = 'https://www.joinpausepod.com';
+
+/** *Join the waitlist* i rutans hörn, i ribbonens toner med glans upptill.
+ *  Öppnar webbsidan, där väntelistan bor. */
+function WaitlistPill() {
+  const [w, setW] = useState(0);
+  return (
+    <TouchableOpacity
+      style={waitlistStyles.pill}
+      onLayout={e => {
+        const next = Math.round(e.nativeEvent.layout.width);
+        setW(prev => (prev === next ? prev : next));
+      }}
+      onPress={() => {
+        track('pod_waitlist_opened');
+        Linking.openURL(WAITLIST_URL).catch(() => {});
+      }}
+      activeOpacity={0.75}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      accessibilityRole="link"
+      accessibilityLabel="Join the waitlist on joinpausepod.com"
+    >
+      {w > 0 && (
+        <Svg width={w} height={WAITLIST_H} style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Defs>
+            <LinearGradient id="waitlistRibbon" x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor={RIBBON[0]} stopOpacity={0.9} />
+              <Stop offset="0.5" stopColor={RIBBON[1]} stopOpacity={0.9} />
+              <Stop offset="1" stopColor={RIBBON[2]} stopOpacity={0.9} />
+            </LinearGradient>
+            <LinearGradient id="waitlistSheen" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#ffffff" stopOpacity={0.5} />
+              <Stop offset="0.55" stopColor="#ffffff" stopOpacity={0.05} />
+              <Stop offset="1" stopColor="#ffffff" stopOpacity={0} />
+            </LinearGradient>
+          </Defs>
+          <Rect x={0} y={0} width={w} height={WAITLIST_H} fill="url(#waitlistRibbon)" />
+          <Rect x={0} y={0} width={w} height={WAITLIST_H} fill="url(#waitlistSheen)" />
+        </Svg>
+      )}
+      <Text style={waitlistStyles.text} numberOfLines={1}>Join the waitlist</Text>
+    </TouchableOpacity>
+  );
+}
+
+const waitlistStyles = StyleSheet.create({
+  // En flik i rutans övre högra hörn: kanten följer rutans eget hörn
+  // (`section`, Radius.lg), och hörnet in mot rutan är rundat. Ett px utanför
+  // så att den ligger över rutans kantlinje. Rektanglarna i svg:n är raka;
+  // det är vyns hörn som klipper dem.
+  pill: {
+    position: 'absolute',
+    top: -1,
+    right: -1,
+    height: WAITLIST_H,
+    paddingHorizontal: 14,
+    borderTopRightRadius: Radius.lg,
+    borderBottomLeftRadius: Radius.lg,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  text: { fontSize: 13, fontWeight: '700', color: RIBBON_INK },
+});
+
+/** Försmaken: lådan stor i ett sken, vad den gör på en rad, och vägen till
+ *  lådsidan (app/pod.tsx), som finns för att den som inte har en ska vilja ha
+ *  en. */
+function PodTeaser() {
+  const Palette = usePalette();
+  return (
+    <View style={{ alignItems: 'center', paddingTop: 18, paddingBottom: 4 }}>
+      <View style={{ width: 150, height: 110, alignItems: 'center', justifyContent: 'center' }}>
+        <View
+          style={{
+            position: 'absolute', width: 150, height: 110, borderRadius: 75,
+            backgroundColor: Palette.hueTint,
+          }}
+        />
+        <PodBoxIcon width={104} />
+      </View>
+      <Text style={{
+        marginTop: 14, fontSize: 18, fontWeight: '900', letterSpacing: 0.5,
+        color: Palette.textPrimary, textTransform: 'uppercase',
+      }}>
+        Coming soon
+      </Text>
+      <Text style={{
+        marginTop: 6, fontSize: 14, lineHeight: 21, color: Palette.textSecondary,
+        textAlign: 'center', maxWidth: 260,
+      }}>
+        {'A physical place for your phone.\nClose the lid. Pause starts.'}
+      </Text>
+      <TouchableOpacity
+        onPress={() => router.push('/pod' as never)}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        style={{ marginTop: 14 }}
+        accessibilityRole="button"
+      >
+        <Text style={{ fontSize: 14, fontWeight: '600', color: Palette.hue }}>See how it works ›</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 type ThemeOption = {
   value: ThemePreference;
@@ -151,28 +268,42 @@ function SettingsScreen() {
       <View style={styles.section}>
         {/* Lådan i hörnet, samma som på en lådpaus i statistiken. */}
         <View style={styles.podTitleRow}>
-          <PodBoxIcon width={40} />
-          <Text style={[styles.sectionTitle, styles.podTitle]}>PausePod</Text>
-          {/* Lådsidan: vad lådan är och hur den ställs in (app/pod.tsx). */}
-          <TouchableOpacity
-            style={styles.podHow}
-            onPress={() => router.push('/pod' as never)}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityRole="button"
-          >
-            <Text style={styles.podHowText}>How it works ›</Text>
-          </TouchableOpacity>
+          <View style={styles.podTitleLead}>
+            <PodBoxIcon width={40} />
+            <Text style={[styles.sectionTitle, styles.podTitle]}>PausePod</Text>
+          </View>
+          {!POD_COMING_SOON && (
+            // Lådsidan: vad lådan är och hur den ställs in (app/pod.tsx).
+            <TouchableOpacity
+              style={styles.podHow}
+              onPress={() => router.push('/pod' as never)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+            >
+              <Text style={styles.podHowText}>How it works ›</Text>
+            </TouchableOpacity>
+          )}
         </View>
-        {/* Lådans nätverksläge (app/pod-network.tsx). Egen rad och inte en
+        {POD_COMING_SOON ? <PodTeaser /> : (
+        <View>
+        {/* Lådans nätverksläge (app/pod-network.tsx). En hel rad och inte en
             andra länk i titelraden: två chevroner bredvid varandra läses som
             samma sak, och den här handlar om just den här lådan här och nu. */}
         <TouchableOpacity
           style={styles.podNet}
           onPress={() => router.push('/pod-network' as never)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          activeOpacity={0.8}
           accessibilityRole="button"
+          accessibilityLabel="Pod and Wi-Fi"
         >
-          <Text style={styles.podHowText}>Pod and Wi-Fi ›</Text>
+          <View style={styles.podNetIcon}>
+            <FontAwesome5 name="wifi" size={15} color={Palette.hue} />
+          </View>
+          <View style={styles.tagText}>
+            <Text style={styles.tagName}>Pod and Wi-Fi</Text>
+            <Text style={styles.tagMeta}>Network and uploads</Text>
+          </View>
+          <FontAwesome5 name="chevron-right" size={13} color={Palette.textTertiary} />
         </TouchableOpacity>
         <Text style={styles.sectionSubtitle}>
           {myTags && myTags.length > 0
@@ -213,6 +344,10 @@ function SettingsScreen() {
             {myTags && myTags.length > 0 ? 'Register another tag' : 'Register a Pause tag'}
           </Text>
         </TouchableOpacity>
+        </View>
+        )}
+        {/* Sist, så att fliken ligger ovanpå allt i rutan. */}
+        {POD_COMING_SOON && <WaitlistPill />}
       </View>
 
     </DismissKeyboardView>
@@ -269,8 +404,27 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   },
   podTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   podTitle: { marginBottom: 0 },
+  podTitleLead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   podHow: { marginLeft: 'auto' },
-  podNet: { alignSelf: 'flex-start', paddingVertical: 6 },
+  podNet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginTop: 8,
+    marginBottom: 20,
+    backgroundColor: Palette.surfaceAlt,
+    borderRadius: Radius.md,
+  },
+  podNetIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Palette.hueTint,
+  },
   podHowText: { fontSize: 14, fontWeight: '600', color: Palette.hue },
   sectionSubtitle: {
     fontSize: 14,

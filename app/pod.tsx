@@ -12,6 +12,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
 
+/** Lådan går inte att köpa än, så *Register a Pause tag* står grå och
+ *  otryckbar. `true` öppnar den igen. Samma läge som `POD_COMING_SOON` i
+ *  Settings (app/onboarding.tsx). */
+const TAG_REGISTRATION_OPEN = false;
+
 /**
  * Hör till **pause-rummet**, se ROOMS i constants/appTheme.ts.
  *
@@ -95,7 +100,6 @@ const USE: Step[] = [
     frames: [
       { ms: 1800, set: { lid: 0 } },
       { ms: 1400, set: { screen: 'check' } },
-      { ms: 3200, set: { screen: 'count' } },
       { ms: 2600, set: { screen: 'active' } },
     ],
   },
@@ -176,7 +180,6 @@ const SETUP: Step[] = [
       { ms: 3400, set: { screen: 'paired' } },
       { ms: 1800, set: { lid: 0 } },
       { ms: 1400, set: { screen: 'check' } },
-      { ms: 3200, set: { screen: 'count' } },
       { ms: 2600, set: { screen: 'active' } },
     ],
   },
@@ -327,13 +330,15 @@ function PodScreen() {
 
         {tab === 'setup' && (
           <TouchableOpacity
-            style={styles.cta}
+            style={[styles.cta, !TAG_REGISTRATION_OPEN && styles.ctaOff]}
             onPress={() => router.push('/pair' as never)}
+            disabled={!TAG_REGISTRATION_OPEN}
             activeOpacity={0.85}
             accessibilityRole="button"
+            accessibilityState={{ disabled: !TAG_REGISTRATION_OPEN }}
           >
-            <FontAwesome5 name="tag" size={14} color={Palette.onAccent} />
-            <Text style={styles.ctaText}>Register a Pause tag</Text>
+            <FontAwesome5 name="tag" size={14} color={TAG_REGISTRATION_OPEN ? Palette.onAccent : Palette.textDisabled} />
+            <Text style={[styles.ctaText, !TAG_REGISTRATION_OPEN && styles.ctaTextOff]}>Register a Pause tag</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -370,4 +375,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
   },
   ctaText: { fontSize: 16, fontWeight: '700', color: Palette.onAccent },
+  ctaOff: { backgroundColor: Palette.ink08 },
+  ctaTextOff: { color: Palette.textDisabled },
 });

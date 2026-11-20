@@ -202,6 +202,23 @@ export async function takeGlobalPauseResult(): Promise<GlobalPauseResult | null>
   return result;
 }
 
+/**
+ * All tid alla pausat i appen, app och låda, utan nätter
+ * (`get_total_paused_seconds` i supabase/global_pause.sql). `null` vid fel —
+ * då står raden inte där.
+ */
+export async function fetchTotalPausedSeconds(): Promise<number | null> {
+  const { data, error } = await supabase.rpc('get_total_paused_seconds');
+  if (error || data == null) return null;
+  return Number(data);
+}
+
+/** `403 h 48 m`. Alltid timmar, också när talet blir stort. */
+export function formatTotalPaused(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
+}
+
 /** `Tue 18:00`, i telefonens tid. */
 export function formatGlobalPauseStart(iso: string): string {
   const d = new Date(iso);

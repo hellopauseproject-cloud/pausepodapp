@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -18,7 +18,7 @@ import Svg, { Circle, Defs, Path, RadialGradient, Rect, Stop } from 'react-nativ
  * ([firmware/pausepod_firmware_v8](../firmware/pausepod_firmware_v8/pausepod_firmware_v8.ino),
  * `render*`) i lådsidans form: **en rad, stor**, för att kameran inte längre
  * zoomar in på displayen (på begäran) och texten ska gå att läsa ändå.
- * Orden och färgerna är lådans — HI, CLOCK ON., ON HOLD i honung, den gröna
+ * Orden och färgerna är lådans — HI, ON HOLD i honung, den gröna
  * bocken — men varje skärm är kortad till det viktigaste. Ändras en skärm
  * i firmwaren ska den ändras här.
  *
@@ -27,7 +27,7 @@ import Svg, { Circle, Defs, Path, RadialGradient, Rect, Stop } from 'react-nativ
  */
 
 export type PodScreenId =
-  | 'off' | 'logo' | 'checking' | 'hello' | 'check' | 'clockOn' | 'count'
+  | 'off' | 'logo' | 'checking' | 'hello' | 'check'
   | 'active' | 'hold' | 'done' | 'wifi' | 'connected' | 'pair' | 'paired';
 
 const BG = '#03060e';
@@ -71,10 +71,6 @@ function ScreenBody({ id, u, name, width, height }: { id: PodScreenId; u: U; nam
       return <Heavy u={u} size={48}>{hi}</Heavy>;
     case 'check':
       return <Check u={u} r={30} />;
-    case 'clockOn':
-      return <Heavy u={u} size={46}>CLOCK ON.</Heavy>;
-    case 'count':
-      return <Count u={u} />;
     case 'active':
       return <ActiveMark u={u} width={width} height={height} />;
     case 'hold':
@@ -227,16 +223,6 @@ function CheckStatic({ u, r }: { u: U; r: number }) {
       />
     </Svg>
   );
-}
-
-/** 00:01–00:03 direkt efter bocken (lådan visar CLOCK ON. emellan; sidan hoppar över den på begäran), en sekund i taget (lådan räknar till 5, `COUNT_SECONDS`; sidan kortar till 3 på begäran). */
-function Count({ u }: { u: U }) {
-  const [n, setN] = useState(1);
-  useEffect(() => {
-    const t = setInterval(() => setN(v => Math.min(3, v + 1)), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return <Heavy u={u} size={52}>{`00:0${n}`}</Heavy>;
 }
 
 /** Pausen pågår: märket i sin gloria, och inget mer. */

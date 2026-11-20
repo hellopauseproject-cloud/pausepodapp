@@ -466,3 +466,28 @@ $$;
 
 revoke execute on function get_my_last_global_result() from public, anon;
 grant execute on function get_my_last_global_result() to authenticated;
+
+
+-- ── All tid, alla ───────────────────────────────────────────────────────────
+--
+-- Summan av varje paus någon tagit i appen, för raden *403 h 48 m paused
+-- together* överst i rummet. Båda vägarna räknas, appens pauser och lådans
+-- (NFC-pausen skrivs som en vanlig rad med `with_pod`), men inte nätterna
+-- (`kind = 'sleep'`), och inte testkontona i `analytics.excluded_users`.
+-- Bara talet lämnas ut: inga rader, inga id:n. `security definer` för att
+-- summera tvärs över RLS, samma linje som resten av rummet.
+create or replace function get_total_paused_seconds()
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(sum(s.duration_seconds), 0)::bigint
+    from pause_sessions s
+   where s.kind = 'pause'
+     and not exists (select 1 from analytics.excluded_users x where x.user_id = s.user_id)
+$$;
+
+revoke execute on function get_total_paused_seconds() from public, anon;
+grant execute on function get_total_paused_seconds() to authenticated;

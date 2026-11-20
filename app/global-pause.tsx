@@ -23,7 +23,8 @@ import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { safeBottom } from '../lib/bottomInset';
 import { formatDuration } from '../lib/circles';
 import {
-  DemoPhase, fetchGlobalPause, formatCountdown, formatGlobalPauseWhen, GLOBAL_PAUSE_DEMO, GlobalPause,
+  DemoPhase, fetchGlobalPause, fetchTotalPausedSeconds, formatCountdown, formatGlobalPauseWhen, formatTotalPaused,
+  GLOBAL_PAUSE_DEMO, GlobalPause,
   GlobalPausePerson, joinGlobalPause, rejoinGlobalPause, setDemoPhase, wasSummarized,
 } from '../lib/globalPause';
 import { GLOBAL_PAUSE_NAME, notificationsBlocked, scheduleGlobalPauseReminder } from '../lib/notifications';
@@ -47,6 +48,9 @@ import { Category, DEFAULT_CATEGORIES, getSelectedCategories } from './pauseLogg
  */
 
 const POLL_MS = 5000;
+// All tid alla pausat rör sig långsamt; en summa över hela pause_sessions var
+// femte sekund per tittare vore slöseri.
+const TOTAL_POLL_MS = 60_000;
 const LINE_MS = 4200;
 const FACES_SHOWN = 5;
 const FACE_H = 44;
@@ -189,6 +193,15 @@ function GlobalPauseScreen() {
     return () => { clearInterval(id); setFocused(false); };
   }, [load]));
 
+  // Raden överst: varje paus någon tagit, app och låda. Står i alla lägen.
+  const [totalSeconds, setTotalSeconds] = useState<number | null>(null);
+  useFocusEffect(useCallback(() => {
+    const loadTotal = () => fetchTotalPausedSeconds().then(t => { if (t !== null) setTotalSeconds(t); }, () => {});
+    loadTotal();
+    const id = setInterval(loadTotal, TOTAL_POLL_MS);
+    return () => clearInterval(id);
+  }, []));
+
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
@@ -276,10 +289,22 @@ function GlobalPauseScreen() {
     </View>
   );
 
+  // Alltid samma höjd, också innan talet kommit, så att klotet inte hoppar.
+  const totalLine = (
+    <View style={s.totalSlot}>
+      {totalSeconds !== null && (
+        <Text style={s.totalText} numberOfLines={1}>
+          <Text style={s.totalNumber}>{formatTotalPaused(totalSeconds)}</Text> paused together
+        </Text>
+      )}
+    </View>
+  );
+
   if (!pause) {
     return (
       <View style={[s.screen, { paddingTop: insets.top + 6 }]}>
         {header}
+        {totalLine}
         <View style={s.heroArea}>
           {failed ? (
             <TouchableOpacity onPress={load} activeOpacity={0.7}>
@@ -315,6 +340,7 @@ function GlobalPauseScreen() {
   return (
     <View style={[s.screen, { paddingTop: insets.top + 6, paddingBottom: safeBottom(insets.bottom) + ACTIONS_BOTTOM }]}>
       {header}
+      {totalLine}
 
       <View style={s.heroArea}>
         <GlobeGrid size={GLOBE} active={focused} fade={Palette.bg} />
@@ -536,6 +562,10 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   demoRow: { flexDirection: 'row', gap: 16 },
   demoText: { fontSize: 12, color: Palette.textTertiary },
+
+  totalSlot: { height: 24, alignItems: 'center', justifyContent: 'center' },
+  totalText: { fontSize: 14, color: Palette.textSecondary, fontVariant: ['tabular-nums'] },
+  totalNumber: { fontWeight: '700', color: Palette.textPrimary },
 
   heroArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // Designsystemets display: Arial Black 900, −0.03em.
