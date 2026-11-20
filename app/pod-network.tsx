@@ -84,12 +84,18 @@ function PodNetworkScreen() {
           ? 'offline' as const
           : 'good' as const;
 
+  // Raden under ordet finns bara när den säger något ordet inte gör. Här
+  // stod en rad per läge — *Your pauses are safe*, *Your pod sends your
+  // pauses on its own* — och de var tröst och inte upplysning: statusordet
+  // hade redan sagt saken, och knappen säger vad man gör åt den. Kvar står
+  // en instruktion (lådan svarar inte) och ett faktum om mekaniken (kön
+  // töms av sig själv), båda utan ett ord om hur användaren bör känna.
   const COPY = {
-    away:    { word: 'NOT NEARBY', line: 'Open the lid and keep the phone close.' },
-    old:     { word: 'NEARBY',     line: 'This pod is on older firmware and says no more.' },
-    nowifi:  { word: 'NO WI-FI',   line: 'Set it up on the pod. Your pauses wait inside.' },
-    offline: { word: 'NO SIGNAL',  line: 'Your pauses are safe. They go up when it is back.' },
-    good:    { word: 'ALL GOOD',   line: 'Your pod sends your pauses on its own.' },
+    away:    { word: 'NOT NEARBY', line: 'Open the lid, stay close.' },
+    old:     { word: 'NEARBY',     line: 'Older firmware.' },
+    nowifi:  { word: 'NO WI-FI',   line: '' },
+    offline: { word: 'NO SIGNAL',  line: "Pauses go up when it's back." },
+    good:    { word: 'ALL GOOD',   line: '' },
   }[state];
 
   const loud = state === 'nowifi' || state === 'offline';
@@ -122,7 +128,7 @@ function PodNetworkScreen() {
           </View>
         </View>
 
-        <Text style={styles.line}>{COPY.line}</Text>
+        {!!COPY.line && <Text style={styles.line}>{COPY.line}</Text>}
 
         {/* Detaljerna, bara de som finns. Nätets namn när lådan har ett, och
             kön bara när något faktiskt väntar — "Waiting: none" är en rad som
