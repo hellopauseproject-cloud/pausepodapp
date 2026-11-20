@@ -169,6 +169,19 @@ export function setAnalyticsUser(userId: string | null): void {
 }
 
 /**
+ * Släng det som ligger kvar i kön för ett konto som raderats. Raderna kan
+ * aldrig skickas (RLS kräver `user_id = auth.uid()`), och eftersom en avvisad
+ * insert lämnar hela batchen kvar hade de stoppat kön för nästa konto som
+ * loggar in på telefonen.
+ */
+export function forgetAnalyticsUser(userId: string): void {
+  try {
+    queue = queue.filter(e => e.user_id !== userId);
+    void persistNow();
+  } catch {}
+}
+
+/**
  * Logga en händelse. Fire-and-forget — anropa utan `await`.
  *
  * Namnge i `snake_case` och i tempus "det här hände" (`pause_started`, inte

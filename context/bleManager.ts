@@ -10,8 +10,18 @@
 // Webbvarianten finns för att kunna titta på UI:t i en webbläsare utan att
 // bygga om appen. Den är ett granskningsverktyg, inte en andra plattform:
 // lådans anslutning, sensorerna och kameran finns inte där.
+//
+// Managern skapas vid första användningen och inte vid modulladdning: på iOS
+// är det själva `new BleManager()` som ställer Bluetooth-frågan, och den ska
+// komma när någon öppnar *Pod and Wi-Fi*, inte vid första appstarten för
+// alla som inte har en låda.
 import { BleManager } from 'react-native-ble-plx';
 
 export { ConnectionPriority } from 'react-native-ble-plx';
 
-export const manager = new BleManager();
+let manager: BleManager | null = null;
+
+export function getManager(): BleManager {
+  if (!manager) manager = new BleManager();
+  return manager;
+}

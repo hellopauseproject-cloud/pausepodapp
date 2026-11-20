@@ -333,6 +333,7 @@ En gång om dagen pausar alla samtidigt. Schema och regler i
   Live kräver att lådan skickar start och frysning över WiFi.
 - **Alla i rummet syns med användarnamn**, på begäran: *Someone* var opersonligt, och att anmäla sig är att kliva in i rummet. `global_pause_joins` har inga grants och `get_global_pause` lämnar aldrig ut ett `user_id`. Vänner och kretskamrater står först, i rummens kulörer. En egen intention är fritext och visas som *is pausing* för alla andra.
 - **Inga bottar, och siffrorna är alltid de riktiga.**
+- **Överst i rummet står all tid alla pausat**, i alla lägen: *403 h 48 m paused together* (november 2026, på begäran). Varje paus i appen och i lådan, inte nätterna och inte testkontona, alltid i timmar och minuter. Talet kommer ur `get_total_paused_seconds()` i global_pause.sql, som bara lämnar ut summan, och hämtas en gång i minuten i stället för var femte sekund. Raden har fast höjd, så att klotet inte hoppar när talet landar.
 - **Påminnelsen är lokal**, 10 minuter före, och läggs ut av *I'll join*. Den
   är appens sjunde notis, och den kan inte växa av sig själv: man väljer den
   själv, en gång per global paus. Egen Android-kanal. **Är appens notiser
@@ -930,7 +931,7 @@ lådan skickas snart, och den som inte har en ska vilja ha en.
   lägger sig platt igen efteråt), kameran läser koden och
   öppnar `/pair` (*Tag found.*, *It's yours.*) → telefonen
   tillbaka, och lådan säger **HI, <NAMN>** → locket på, och den första
-  pausen startar (bocken, nedräkningen, märket) som i ritualen. **CLOCK ON.** visas inte på sidan, och **DONE** står i grönt (november 2026, på begäran).
+  pausen startar (bocken, märket) som i ritualen. **DONE** står i grönt (november 2026, på begäran).
 - **Lådan är ritad, inte fotograferad** — geometrin i
   [lib/podBoxArt.ts](lib/podBoxArt.ts) (ren data i snedprojektion, efter
   fotona: ljus ek med ådring, rundade kanter, skårorna på gaveln, en tunn, platt mörkgrå ram runt displayen;
@@ -943,7 +944,7 @@ lådan skickas snart, och den som inte har en ska vilja ha en.
   på. Allt ritas dubbelt så stort och skalas ner så att det inzoomade är
   skarpt.
 - **Displayen är firmwarens ord, en stor rad i taget**
-  ([components/pod-screen.tsx](components/pod-screen.tsx)): HI, CLOCK ON.,
+  ([components/pod-screen.tsx](components/pod-screen.tsx)): HI,
   ON HOLD i honung, den gröna bocken, men kortade så att texten klarar 11 px
   utan zoom; ett långt namn krymper i stället för att klippas. Ändras en
   skärm i `.ino`-filen ska den ändras där.
@@ -972,8 +973,8 @@ Characteristic UUID `abcdefab-cdef-abcd-efab-cdefabcdefab` (notify + write).
 
 1. Telefonen läggs i lådan → taggen läses (`TAG_POLL_MS` 150) → uppslag
    mot `box-tag` → **HI, <NAMN>**.
-2. Locket stängs → pausen startar: bock → **CLOCK ON.** → 00:01–00:05 →
-   märket (`CER_END`, ~8,4 s). Klockan går redan under ceremonin. Stängs
+2. Locket stängs → pausen startar: bock → märket (`CER_END`, ~1,8 s;
+   **CLOCK ON.** och uppräkningen togs bort i v8.4). Klockan går redan under ceremonin. Stängs
    locket medan uppslaget är på väg startar pausen när svaret kommer
    (`startWhenKnown`).
 3. Locket öppnas → klockan fryser, **ON HOLD**, 30 s frist (`RESPITE_MS`).
@@ -1111,9 +1112,19 @@ Protokollet och reglerna för pausposter bor i
 ## App-arkitektur, kort
 
 - [context/BLEContext.tsx](context/BLEContext.tsx) — BLE-anslutning
-  (singleton `BleManager`, ansluter en gång vid appstart, kopplas aldrig ner
-  vid backgrounding) och allt lådan säger om sig själv. Appen skickar
-  ingenting: den lyssnar.
+  (singleton `BleManager`, kopplas aldrig ner vid backgrounding) och allt
+  lådan säger om sig själv. Appen skickar ingenting: den lyssnar.
+  **Bluetooth startar först när *Pod and Wi-Fi* öppnas** (november 2026):
+  managern skapas vid första användningen (`getManager()` i
+  context/bleManager.ts), eftersom `new BleManager()` på iOS ställer
+  Bluetooth-frågan, och den ska inte komma vid första appstarten för alla
+  som inte har en låda. Anslut inte vid appstart igen.
+  **Skanningen ger upp efter 15 s** (`SCAN_TIMEOUT_MS`, händelsen
+  `box_scan_timed_out`) — förr letade den för alltid utan låda i närheten,
+  också i bakgrunden. `bluetoothProblem` säger om Bluetooth är av eller
+  nekat, och statussidan visar då *BLUETOOTH OFF* (letar själv när det slås
+  på) eller *NO ACCESS* med *Open Settings* (försöker igen när appen kommer
+  tillbaka) i stället för ett NOT NEARBY som inte stämmer.
 - [lib/bleProtocol.ts](lib/bleProtocol.ts) — enda platsen som känner till
   exakt textformat för varje meddelande.
 - [context/SessionContext.tsx](context/SessionContext.tsx) — håller den
@@ -1241,6 +1252,29 @@ Protokollet och reglerna för pausposter bor i
   [supabase/security_private_media.sql](supabase/security_private_media.sql)
   gör bucketen privat och körs **först när alla har en app med
   signeringen** — en äldre app spelar annars inte upp någonting.
+
+### Radera kontot
+
+**Längst ner i profilen, under *Log out*** (november 2026, krav från App
+Store och Google Play): *Delete account* → *Delete your account?* med vad som
+raderas → en nedräkning från 5 med *Cancel* → raderingen, och grinden skickar
+till inloggningen. `deleteAccount` i [contexts/AuthContext.tsx](contexts/AuthContext.tsx),
+`delete_my_account()` i [supabase/delete_account.sql](supabase/delete_account.sql)
+(körs för hand **före appen**).
+
+- **Filerna raderas av klienten först**, mappen `<user_id>/` i varje bucket:
+  `storage.objects` går inte att radera med SQL. Bästa försök — en fil som
+  inte gick får inte stoppa raderingen.
+- **Kretsen överlever den som skapade den.** `circles.created_by` är
+  `on delete cascade`, så funktionen går ur varje krets med `leave_circle`
+  och flyttar `created_by` till ägaren innan profilen raderas.
+- `friendships`, `pause_sessions` och `pause_messages` har `no action` och
+  raderas för hand; resten följer med profilen. Chatten och flödet står kvar
+  som *Someone*, och `app_events` blir anonyma.
+- **En ny tabell med `no action` mot profiles stoppar raderingen** — lägg
+  den i funktionen.
+- Kön i lib/analytics.ts töms på kontots rader (`forgetAnalyticsUser`), annars
+  stoppar de kön för nästa konto på telefonen.
 
 ### Användarnamn är unika, skiftlägesokänsligt
 

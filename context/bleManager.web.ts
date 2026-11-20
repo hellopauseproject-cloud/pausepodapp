@@ -21,7 +21,11 @@ function warnOnce() {
 
 type StateListener = (state: string) => void;
 
-export const manager = {
+export function getManager() {
+  return manager;
+}
+
+const manager = {
   onStateChange(_listener: StateListener, _emitCurrentState?: boolean) {
     warnOnce();
     // Anropas aldrig. BLEContext väntar på 'PoweredOn' innan den skannar,

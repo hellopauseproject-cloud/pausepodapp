@@ -1,7 +1,7 @@
 import { FontAwesome5 } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { AppState, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PodBoxIcon } from '../components/pod-box-icon';
 import { roomShell, ScreenBackground } from '../components/screen-background';
@@ -70,11 +70,36 @@ function PodNetworkScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const insets = useSafeAreaInsets();
-  const { isConnected, serverBoxId, netStatus, connectToPausePod, isScanning } = useBLEControl();
+  const { isConnected, serverBoxId, netStatus, connectToPausePod, isScanning, bluetoothProblem } = useBLEControl();
+
+  // Det enda stället appen startar Bluetooth (se context/BLEContext.tsx):
+  // frågan om behörighet kommer när någon letar efter sin låda, inte vid
+  // första appstarten. Anslutningen står kvar när sidan stängs.
+  useEffect(() => {
+    connectToPausePod();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Kommer man tillbaka från Settings efter att ha gett behörigheten ska
+  // sidan försöka igen av sig själv.
+  useEffect(() => {
+    if (bluetoothProblem !== 'denied') return;
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active') connectToPausePod();
+    });
+    return () => sub.remove();
+  }, [bluetoothProblem, connectToPausePod]);
 
   // Ett läge, ett svar. Ordningen är sidans: det första som inte stämmer är
   // det som står stort, så användaren aldrig får två problem att väga.
-  const state = !isConnected
+  // Bluetooth går före allt: utan det säger NOT NEARBY något som inte är sant.
+  const state = !isConnected && bluetoothProblem === 'off'
+    ? 'btoff' as const
+    : !isConnected && bluetoothProblem === 'denied'
+    ? 'btdenied' as const
+    : !isConnected && bluetoothProblem === 'unsupported'
+    ? 'btnone' as const
+    : !isConnected
     ? 'away' as const
     : netStatus === null
       ? 'old' as const
@@ -96,6 +121,10 @@ function PodNetworkScreen() {
   // tömmer kön själv när nätet är tillbaka är vad lådan *gör*, inte något
   // användaren ska behöva läsa om för att känna sig trygg.
   const COPY = {
+    // Står Bluetooth av letar appen så fort det slås på — ingen knapp behövs.
+    btoff:    { word: 'BLUETOOTH OFF', line: 'Turn it on to find your pod.' },
+    btdenied: { word: 'NO ACCESS',     line: 'Allow Bluetooth in Settings.' },
+    btnone:   { word: 'NO BLUETOOTH',  line: '' },
     away:    { word: 'NOT NEARBY', line: 'Open the lid, stay close.' },
     old:     { word: 'NEARBY',     line: 'Older firmware.' },
     nowifi:  { word: 'NO WI-FI',   line: '' },
@@ -106,7 +135,8 @@ function PodNetworkScreen() {
     good:    { word: 'CONNECTED',  line: '' },
   }[state];
 
-  const loud = state === 'nowifi' || state === 'offline';
+  const loud = state === 'nowifi' || state === 'offline'
+    || state === 'btoff' || state === 'btdenied' || state === 'btnone';
   const queued = netStatus?.queued ?? 0;
 
   return (
@@ -164,6 +194,17 @@ function PodNetworkScreen() {
             accessibilityRole="button"
           >
             <Text style={styles.btnText}>{isScanning ? 'Looking…' : 'Connect'}</Text>
+          </TouchableOpacity>
+        )}
+
+        {state === 'btdenied' && (
+          <TouchableOpacity
+            style={styles.btn}
+            onPress={() => Linking.openSettings().catch(() => {})}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+          >
+            <Text style={styles.btnText}>Open Settings</Text>
           </TouchableOpacity>
         )}
 

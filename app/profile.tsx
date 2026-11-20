@@ -1,10 +1,11 @@
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useNavigation } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { AppPalette, Radius, Spacing, alpha } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
@@ -22,6 +23,8 @@ import { saveProfile } from './userProfile';
  * [constants/appTheme.ts](../constants/appTheme.ts) för varför de tre
  * skärmarna bakom Hems topbar-ikoner delar ett eget, mörkare rum.
  */
+const DELETE_COUNTDOWN_S = 5;
+
 export default function ProfileRoom() {
   return (
     <RoomProvider room="study">
@@ -37,7 +40,7 @@ function ProfileScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const insets = useSafeAreaInsets();
-  const { signOut, user } = useAuth();
+  const { signOut, deleteAccount, user } = useAuth();
   const navigation = useNavigation();
   // Startar i det Hem redan hämtat (lib/myProfile.ts), så att namn och foto
   // står där direkt; raden läses ändå om nedan.
@@ -57,6 +60,43 @@ function ProfileScreen() {
   // inte över.
   const editedRef = useRef(false);
   editedRef.current = hasChanges;
+
+  // Radera kontot: fråga → räkna ner → radera. Nedräkningen är en sista
+  // chans att ångra, och Cancel står kvar hela vägen fram till noll.
+  const [deleteStep, setDeleteStep] = useState<null | 'confirm' | 'countdown' | 'deleting' | 'error'>(null);
+  const [deleteCount, setDeleteCount] = useState(DELETE_COUNTDOWN_S);
+  // Grinden byter rutt när kontot är borta; då ska frågan om osparade
+  // ändringar inte stoppa vägen ut.
+  const deletingRef = useRef(false);
+
+  useEffect(() => {
+    if (deleteStep !== 'countdown') return;
+    if (deleteCount === 0) {
+      setDeleteStep('deleting');
+      deletingRef.current = true;
+      deleteAccount().then(({ error }) => {
+        if (!error) return;
+        deletingRef.current = false;
+        setDeleteStep('error');
+      });
+      return;
+    }
+    const t = setTimeout(() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      setDeleteCount(c => c - 1);
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [deleteStep, deleteCount, deleteAccount]);
+
+  const startDeleteCountdown = () => {
+    setDeleteCount(DELETE_COUNTDOWN_S);
+    setDeleteStep('countdown');
+  };
+
+  const cancelDelete = () => {
+    if (deleteStep === 'deleting') return;
+    setDeleteStep(null);
+  };
 
   // Primär källa: Supabase — re-fetchar när user.id ändras (logout/login som annan)
   useEffect(() => {
@@ -181,7 +221,7 @@ function ProfileScreen() {
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
-      if (!hasChanges) return;
+      if (!hasChanges || deletingRef.current) return;
       e.preventDefault();
       setUnsavedAction(e.data.action);
     });
@@ -276,7 +316,70 @@ function ProfileScreen() {
         <Text style={styles.signOutText}>Log out</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.deleteAccountButton}
+        onPress={() => setDeleteStep('confirm')}
+        accessibilityRole="button"
+      >
+        <Text style={styles.deleteAccountText}>Delete account</Text>
+      </TouchableOpacity>
+
     </ScrollView>
+
+      {/* Delete account: confirm → countdown → deleting */}
+      <Modal visible={!!deleteStep} transparent animationType="fade" onRequestClose={cancelDelete}>
+        <View style={styles.unsavedOverlay}>
+          <View style={styles.unsavedSheet}>
+            {deleteStep === 'confirm' && (
+              <>
+                <Text style={styles.unsavedTitle}>Delete your account?</Text>
+                <Text style={styles.unsavedBody}>
+                  Your profile, pauses, friends, circles, messages and support will be erased for good. This can&apos;t be undone.
+                </Text>
+                <TouchableOpacity style={styles.deleteBtnDanger} onPress={startDeleteCountdown}>
+                  <Text style={styles.unsavedBtnSaveText}>Delete account</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.unsavedBtnCancel} onPress={cancelDelete}>
+                  <Text style={styles.deleteCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
+            {deleteStep === 'countdown' && (
+              <>
+                <Text style={styles.unsavedTitle}>Deleting your account</Text>
+                <Text
+                  style={styles.deleteCount}
+                  accessibilityLiveRegion="polite"
+                  accessibilityLabel={`Deleting in ${deleteCount}`}
+                >
+                  {deleteCount}
+                </Text>
+                <TouchableOpacity style={styles.unsavedBtnSave} onPress={cancelDelete}>
+                  <Text style={styles.unsavedBtnSaveText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
+            {deleteStep === 'deleting' && (
+              <>
+                <Text style={styles.unsavedTitle}>Deleting…</Text>
+                <ActivityIndicator color={Palette.danger} style={styles.deleteSpinner} />
+              </>
+            )}
+            {deleteStep === 'error' && (
+              <>
+                <Text style={styles.unsavedTitle}>Could not delete</Text>
+                <Text style={styles.unsavedBody}>Check your connection and try again.</Text>
+                <TouchableOpacity style={styles.deleteBtnDanger} onPress={startDeleteCountdown}>
+                  <Text style={styles.unsavedBtnSaveText}>Try again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.unsavedBtnCancel} onPress={cancelDelete}>
+                  <Text style={styles.deleteCancelText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Unsaved changes modal */}
       <Modal visible={!!unsavedAction} transparent animationType="fade" onRequestClose={() => setUnsavedAction(null)}>
@@ -439,6 +542,36 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   signOutText: {
     color: Palette.textTertiary,
     fontSize: 14,
+  },
+  deleteAccountButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginBottom: 20,
+  },
+  deleteAccountText: {
+    color: Palette.danger,
+    fontSize: 14,
+  },
+  deleteBtnDanger: {
+    backgroundColor: Palette.danger,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  deleteCancelText: {
+    color: Palette.textSecondary,
+    fontSize: 15,
+  },
+  deleteCount: {
+    color: Palette.danger,
+    fontSize: 64,
+    lineHeight: 72,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginVertical: 8,
+  },
+  deleteSpinner: {
+    marginVertical: 16,
   },
   statsToggleRow: {
     flexDirection: 'row',

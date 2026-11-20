@@ -11,7 +11,7 @@
 import React, { createContext, useContext, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import type { Device } from 'react-native-ble-plx';
-import { ConnectionPriority, manager } from './bleManager';
+import { ConnectionPriority, getManager } from './bleManager';
 import { track } from '../lib/analytics';
 import { parseBoxMessage } from '../lib/bleProtocol';
 
@@ -20,6 +20,12 @@ const CHARACTERISTIC_UUID = 'abcdefab-cdef-abcd-efab-cdefabcdefab';
 
 const REQUESTED_MTU = 185;
 const RECONNECT_DELAY_MS = 1500;
+// Skanningen gav aldrig upp: utan låda i närheten (det vanliga) stod sidan
+// på *Looking…* för alltid och telefonen skannade i bakgrunden.
+const SCAN_TIMEOUT_MS = 15_000;
+
+/** Varför det inte går att leta, när det inte går. Null = det går. */
+export type BluetoothProblem = 'off' | 'denied' | 'unsupported' | null;
 
 /** Lådans nätverksläge, senast den sa något. Null tills ett `net` kommit. */
 export interface BoxNetStatus {
@@ -45,6 +51,8 @@ export const BLEControlContext = createContext<{
   netStatus: BoxNetStatus | null;
   /** Lådans batteri i procent, ur `battery`. Null tills den sagt något. */
   batteryPercent: number | null;
+  /** Bluetooth av eller nekad. Statussidan säger det i stället för NOT NEARBY. */
+  bluetoothProblem: BluetoothProblem;
 } | null>(null);
 
 const isConnectingRef = { current: false };
@@ -57,30 +65,59 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
   const [serverBoxId, setServerBoxId] = useState<string | null>(null);
   const [netStatus, setNetStatus] = useState<BoxNetStatus | null>(null);
   const [batteryPercent, setBatteryPercent] = useState<number | null>(null);
+  const [bluetoothProblem, setBluetoothProblem] = useState<BluetoothProblem>(null);
   const deviceRef = useRef<Device | null>(null);
 
-  const requestPermissions = async () => {
-    if (Platform.OS === 'android') {
-      await PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-      ]);
-    }
+  /** Android frågar här; iOS frågar när managern skapas. False = nekad. */
+  const requestPermissions = async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') return true;
+    const result = await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    ]);
+    // Android 12+ behöver de två första; äldre bara platsen. En behörighet
+    // som inte finns på telefonens version svaras som beviljad.
+    const ok = (p: string) => result[p as keyof typeof result] === PermissionsAndroid.RESULTS.GRANTED;
+    return Platform.Version >= 31
+      ? ok(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN) && ok(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT)
+      : ok(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
   };
 
   const connectToPausePod = async () => {
     if (isConnectingRef.current || isConnectedRef.current) return;
     isConnectingRef.current = true;
-    await requestPermissions();
+    // Bluetooth startar först här, och det här anropas först när
+    // *Pod and Wi-Fi* öppnas (app/pod-network.tsx) — inte vid appstart.
+    if (!(await requestPermissions())) {
+      setBluetoothProblem('denied');
+      isConnectingRef.current = false;
+      return;
+    }
+    const manager = getManager();
 
     // Måste tas bort så fort den använts — annars staplas en ny lyssnare
     // för varje anrop av connectToPausePod() (nu även vid automatisk
     // återanslutning efter tapp signal), och en enda BT-tillståndsändring
     // längre fram skulle trigga flera parallella skanningar på en gång.
+    //
+    // Står Bluetooth av ligger lyssnaren kvar och skanningen startar av sig
+    // själv när den slås på. Nekad eller saknad kommer aldrig att ändras
+    // medan appen är framme, så då släpps spärren och Connect frågar om.
     const stateSub = manager.onStateChange((state) => {
+      if (state === 'PoweredOff') {
+        setBluetoothProblem('off');
+        return;
+      }
+      if (state === 'Unauthorized' || state === 'Unsupported') {
+        stateSub.remove();
+        setBluetoothProblem(state === 'Unauthorized' ? 'denied' : 'unsupported');
+        isConnectingRef.current = false;
+        return;
+      }
       if (state === 'PoweredOn') {
         stateSub.remove();
+        setBluetoothProblem(null);
         setIsScanning(true);
         console.log('BLE: Skannar efter PausePod...');
         // Lådans anslutningar lämnar inget spår i pause_sessions: en paus
@@ -93,8 +130,16 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
         // svara "Cannot start scanning operation" på nästa startDeviceScan.
         try { manager.stopDeviceScan(); } catch {}
 
+        const scanTimeout = setTimeout(() => {
+          try { manager.stopDeviceScan(); } catch {}
+          track('box_scan_timed_out');
+          setIsScanning(false);
+          isConnectingRef.current = false;
+        }, SCAN_TIMEOUT_MS);
+
         manager.startDeviceScan(null, null, async (error, device) => {
           if (error) {
+            clearTimeout(scanTimeout);
             console.log('BLE scan-fel:', error);
             // Oftast Androids scan-throttling eller en nekad behörighet, och
             // båda ser likadana ut för användaren: lådan går inte att välja.
@@ -105,6 +150,7 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
           }
 
           if (device?.name === 'PausePod') {
+            clearTimeout(scanTimeout);
             manager.stopDeviceScan();
             setIsScanning(false);
             console.log('BLE: Hittade PausePod, ansluter...');
@@ -234,7 +280,7 @@ export function BLEProvider({ children }: { children: React.ReactNode }) {
 
   const controlValue = {
     connectToPausePod, disconnect, isConnected, isScanning,
-    serverBoxId, netStatus, batteryPercent,
+    serverBoxId, netStatus, batteryPercent, bluetoothProblem,
   };
 
   return (

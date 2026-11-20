@@ -1,6 +1,6 @@
 import { Session, User } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useState } from 'react';
-import { setAnalyticsUser, track } from '../lib/analytics';
+import { flush, forgetAnalyticsUser, setAnalyticsUser, track } from '../lib/analytics';
 import { syncIntentions } from '../app/pauseLogger';
 import { clearLocalAccountData } from '../lib/localAccountData';
 import { clearPushToken } from '../lib/notifications';
@@ -16,7 +16,27 @@ type AuthContextType = {
   signUp: (email: string, password: string, username?: string) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<{ error: string | null }>;
 };
+
+// Buckets där användaren laddat upp under `<user_id>/`. Delete-policyerna
+// står i supabase/delete_account.sql.
+const ACCOUNT_BUCKETS = ['avatars', 'support-media', 'voice-messages', 'video-messages', 'video-message'];
+
+/** Bästa försök: en fil som inte gick att radera får inte stoppa raderingen. */
+async function removeMyFiles(userId: string): Promise<void> {
+  await Promise.all(ACCOUNT_BUCKETS.map(async bucket => {
+    try {
+      const store = supabase.storage.from(bucket);
+      while (true) {
+        const { data, error } = await store.list(userId, { limit: 1000 });
+        if (error || !data || data.length === 0) return;
+        const { error: removeError } = await store.remove(data.map(f => `${userId}/${f.name}`));
+        if (removeError) return;
+      }
+    } catch {}
+  }));
+}
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
@@ -245,8 +265,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Raderar kontot för gott (supabase/delete_account.sql). Profilraden och
+  // därmed push-token försvinner med kontot, så clearPushToken behövs inte.
+  // När `user` blir null skickar grinden i app/_layout.tsx till inloggningen.
+  const deleteAccount = async (): Promise<{ error: string | null }> => {
+    const userId = user?.id;
+    if (!userId) return { error: 'Not signed in.' };
+
+    track('account_delete_started');
+    // Kön skickas medan kontot finns; raderna blir anonyma när det raderas.
+    await flush();
+    await removeMyFiles(userId);
+
+    const { error } = await supabase.rpc('delete_my_account');
+    if (error) {
+      console.warn('Delete account failed:', error.message);
+      return { error: error.message };
+    }
+
+    forgetAnalyticsUser(userId);
+    try {
+      // Bara lokalt: sessionen finns inte längre på servern.
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {}
+    await clearLocalAccountData();
+    setSession(null);
+    setUser(null);
+    return { error: null };
+  };
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, onboardingCompleted, completeOnboarding, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, onboardingCompleted, completeOnboarding, signUp, signIn, signOut, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

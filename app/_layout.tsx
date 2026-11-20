@@ -8,7 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { AppThemeProvider, usePalette, useTheme } from '../contexts/ThemeContext';
-import { BLEProvider, useBLEControl } from '../context/BLEContext';
+import { BLEProvider } from '../context/BLEContext';
 import { SessionProvider, useSession } from '../context/SessionContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { initAnalytics, track } from '../lib/analytics';
@@ -44,7 +44,6 @@ function InnerLayout() {
   // ska ramen runt skärmarna byta med resten.
   const { mode } = useTheme();
   const Palette = usePalette();
-  const { connectToPausePod } = useBLEControl();
   const { state: sessionState, dispatch: sessionDispatch } = useSession();
   const { user, loading, onboardingCompleted } = useAuth();
 
@@ -94,10 +93,6 @@ function InnerLayout() {
   const pendingTapRef = useRef<NotificationTap>(null);
   const openFromNotificationRef = useRef<((data: NotificationTap) => void) | null>(null);
   const summaryHandledSeqRef = useRef<string | null>(null);
-  useEffect(() => {
-    connectToPausePod();
-  }, []);
-
   // ── Händelseloggen ────────────────────────────────────────────────────────
   // Kön startas före allt annat så att även det som händer under de första
   // hundradelarna hamnar i den. Raderna saknar user_id tills AuthContext
