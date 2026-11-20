@@ -84,17 +84,22 @@ function PodNetworkScreen() {
           ? 'offline' as const
           : 'good' as const;
 
-  // Raden under ordet finns bara när den säger något ordet inte gör. Här
-  // stod en rad per läge — *Your pauses are safe*, *Your pod sends your
-  // pauses on its own* — och de var tröst och inte upplysning: statusordet
-  // hade redan sagt saken, och knappen säger vad man gör åt den. Kvar står
-  // en instruktion (lådan svarar inte) och ett faktum om mekaniken (kön
-  // töms av sig själv), båda utan ett ord om hur användaren bör känna.
+  // Raden under ordet finns bara när den säger något ordet inte gör, och
+  // bara ett läge klarar provet: svarar lådan inte är locket instruktionen,
+  // och det går inte att gissa sig till — radion är helt av i djupsömn, och
+  // reed-switchen är det enda som väcker den.
+  //
+  // Här stod en rad per läge — *Your pauses are safe*, *Your pod sends your
+  // pauses on its own*, *Pauses go up when it's back* — och de var tröst och
+  // mekanik snarare än upplysning. `NO SIGNAL` behöver ingen: raden
+  // `Waiting · 4 pauses` säger redan att pauserna ligger kvar, och att lådan
+  // tömmer kön själv när nätet är tillbaka är vad lådan *gör*, inte något
+  // användaren ska behöva läsa om för att känna sig trygg.
   const COPY = {
     away:    { word: 'NOT NEARBY', line: 'Open the lid, stay close.' },
     old:     { word: 'NEARBY',     line: 'Older firmware.' },
     nowifi:  { word: 'NO WI-FI',   line: '' },
-    offline: { word: 'NO SIGNAL',  line: "Pauses go up when it's back." },
+    offline: { word: 'NO SIGNAL',  line: '' },
     // CONNECTED, samma ord som lådans egen display säger när nätet kommer
     // upp (se renderers i .ino och *Set it up* i app/pod.tsx). Att appen och
     // lådan säger samma sak om samma sak är värt mer än ett käckare ord.
@@ -158,7 +163,7 @@ function PodNetworkScreen() {
             activeOpacity={0.8}
             accessibilityRole="button"
           >
-            <Text style={styles.btnText}>{isScanning ? 'Looking…' : 'Find my pod'}</Text>
+            <Text style={styles.btnText}>{isScanning ? 'Looking…' : 'Connect'}</Text>
           </TouchableOpacity>
         )}
 
