@@ -12,31 +12,45 @@ import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 /**
  * Hör till **pause-rummet**, se ROOMS i constants/appTheme.ts.
  *
- * Lådans nätverksläge. Ingången är PausePod-delen i Settings
+ * Lådans läge. Ingången är PausePod-delen i Settings
  * ([app/onboarding.tsx](onboarding.tsx)), bredvid *How it works ›*.
  *
- * **Sidan påstår aldrig något den inte vet.** Allt den visar kommer ur
- * lådans `net`-meddelande (firmware v8.5+), som skickas vid anslutning och
- * när läget ändras. Är lådan inte ansluten över Bluetooth finns ingen
- * uppgift alls, och då säger sidan just det — i stället för att visa ett
- * gammalt läge som om det gällde nu. Samma skäl som `netStatus` nollas i
+ * **Sidan är ett svar och inte en rapport.** Den som går hit har en fråga —
+ * fungerar lådan? — och svaret står i ett enda ord, stort, i rummets kulör
+ * när allt är bra och i `warning` när det inte är det. Allt annat på sidan
+ * är detaljer under det svaret. Första versionen var en rubrik på två rader,
+ * en ledtext, ett kort med en ram och två etikettrader med en förklarande
+ * fotnot under — fem lager prosa för tre fakta, och ingen av dem svarade på
+ * frågan förrän man läst alltihop.
+ *
+ * **Inget kort och ingen ram.** Ytan skiljer sig redan från bakgrunden, och
+ * en ruta runt sidans enda innehåll är en andra gräns för samma kant — samma
+ * regel som kretsflikens layoutspråk (*Inga kantlinjer*). Luft i stället.
+ *
+ * **Sidan påstår aldrig något den inte vet.** Allt kommer ur lådans
+ * `net`-meddelande (firmware v8.5+), som skickas vid anslutning och när
+ * läget ändras. Är lådan inte ansluten över Bluetooth finns ingen uppgift
+ * alls, och då säger sidan just det i stället för att visa ett gammalt läge
+ * som om det gällde nu. Samma skäl som `netStatus` nollas i
  * `resetConnectionState` ([context/BLEContext.tsx](../context/BLEContext.tsx)).
  *
  * **Den säger inte varför wifi inte fungerar.** Lådan vet oftast inte om det
  * är lösenordet, routern eller internet, och en gissning här hade varit
- * sämre än ingenting. Lådan knackar (NO WIFI på displayen), appen visar
- * läget, och användaren får veta vad hen kan göra.
+ * sämre än ingenting.
  *
  * **Kön är ingen oro.** Att pauser väntar är hur lådan är byggd: den sparar
- * dem i flashminnet och skickar upp dem när nätet är tillbaka. Därför står
- * raden i vanligt bläck, och först från tre och uppåt — samma tröskel som
+ * dem i flashminnet och skickar upp dem när nätet är tillbaka. Raden står
+ * därför i vanligt bläck, och först från tre och uppåt — samma tröskel som
  * lådans egen NO WIFI-skärm (`WIFI_NOTICE_MIN_QUEUE` i firmware) — får den
- * varningsfärgen (`Palette.warning`) som betyder *observera*.
+ * `warning`.
  *
- * **Wifi-inställningen hör hit när den byggs**: appen skickar nätverkets
- * namn och lösenord till lådan över Bluetooth, så att lådans eget
- * inställningsnät kan tas bort. Knappen nedan är platsen den ska sitta på.
- * Se PAUSPOST_KONTRAKT.md i firmware-mappen.
+ * **Wifi-inställningen hör hit när den byggs**: appen skickar nätets namn
+ * och lösenord till lådan över Bluetooth, så att lådans eget inställningsnät
+ * kan tas bort. Knappen *Set up Wi-Fi* är platsen den ska sitta på — den
+ * leder till `/pod` tills dess. Skrivningen måste grindas av något fysiskt
+ * (locket öppet och en känd tagg), för BLE-länken är oautentiserad och vem
+ * som helst inom räckvidd kan annars peka lådan mot sitt eget nät. Se
+ * PAUSPOST_KONTRAKT.md i firmware-mappen.
  */
 export default function PodNetworkRoom() {
   return (
@@ -58,7 +72,28 @@ function PodNetworkScreen() {
   const insets = useSafeAreaInsets();
   const { isConnected, serverBoxId, netStatus, connectToPausePod, isScanning } = useBLEControl();
 
-  const queueLoud = netStatus !== null && netStatus.queued >= QUEUE_NOTICE_FROM;
+  // Ett läge, ett svar. Ordningen är sidans: det första som inte stämmer är
+  // det som står stort, så användaren aldrig får två problem att väga.
+  const state = !isConnected
+    ? 'away' as const
+    : netStatus === null
+      ? 'old' as const
+      : !netStatus.networkSaved
+        ? 'nowifi' as const
+        : !netStatus.wifiUp
+          ? 'offline' as const
+          : 'good' as const;
+
+  const COPY = {
+    away:    { word: 'NOT NEARBY', line: 'Open the lid and keep the phone close.' },
+    old:     { word: 'NEARBY',     line: 'This pod is on older firmware and says no more.' },
+    nowifi:  { word: 'NO WI-FI',   line: 'Set it up on the pod. Your pauses wait inside.' },
+    offline: { word: 'NO SIGNAL',  line: 'Your pauses are safe. They go up when it is back.' },
+    good:    { word: 'ALL GOOD',   line: 'Your pod sends your pauses on its own.' },
+  }[state];
+
+  const loud = state === 'nowifi' || state === 'offline';
+  const queued = netStatus?.queued ?? 0;
 
   return (
     <ScrollView
@@ -75,90 +110,65 @@ function PodNetworkScreen() {
         >
           <FontAwesome5 name="arrow-left" size={16} color={Palette.hue} />
         </TouchableOpacity>
-        <Text style={styles.kicker}>PAUSEPOD</Text>
-        <Text style={styles.title}>{'Your pod\nand the net'}</Text>
-        <Text style={styles.lead}>
-          Your pod sends your pauses on its own. Here is how it is doing.
-        </Text>
-      </View>
 
-      <View style={styles.gutter}>
-        <View style={styles.card}>
-          <View style={styles.cardHead}>
-            <PodBoxIcon width={40} />
-            <Text style={styles.cardTitle}>{serverBoxId ?? 'Your pod'}</Text>
+        <Text style={styles.title}>{'PAUSE POD\nSTATUS'}</Text>
+
+        {/* Svaret. Lådan vid sidan om, så att det syns vad ordet gäller. */}
+        <View style={styles.answer}>
+          <PodBoxIcon width={52} />
+          <View style={styles.answerText}>
+            <Text style={[styles.word, loud && { color: Palette.warning }]}>{COPY.word}</Text>
+            <Text style={styles.id}>{serverBoxId ?? 'YOUR POD'}</Text>
           </View>
-
-          {!isConnected || netStatus === null ? (
-            <>
-              <Row
-                styles={styles}
-                label="Pod"
-                value={isConnected ? 'Connected' : 'Not nearby'}
-              />
-              <Text style={styles.note}>
-                {isConnected
-                  ? 'This pod runs older firmware and does not report its network yet.'
-                  : 'Open the lid and stay close, then come back here.'}
-              </Text>
-              {!isConnected && (
-                <TouchableOpacity
-                  style={styles.btn}
-                  onPress={connectToPausePod}
-                  disabled={isScanning}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.btnText}>{isScanning ? 'Looking…' : 'Look for my pod'}</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          ) : (
-            <>
-              <Row
-                styles={styles}
-                label="Wi-Fi"
-                value={
-                  netStatus.wifiUp
-                    ? netStatus.ssid || 'Connected'
-                    : netStatus.networkSaved
-                      ? 'No connection'
-                      : 'Not set up'
-                }
-                tone={netStatus.wifiUp ? undefined : Palette.warning}
-              />
-              <Row
-                styles={styles}
-                label="Pauses waiting"
-                value={netStatus.queued === 0 ? 'None' : String(netStatus.queued)}
-                tone={queueLoud ? Palette.warning : undefined}
-              />
-              <Text style={styles.note}>
-                {netStatus.wifiUp
-                  ? 'Your pauses go straight to your circle.'
-                  : netStatus.networkSaved
-                    ? 'Your pod remembers a network but cannot reach it. Your pauses are saved and will be sent when it is back.'
-                    : 'Your pod has no network yet. Your pauses are saved in the pod until it has one.'}
-              </Text>
-              {!netStatus.wifiUp && (
-                <TouchableOpacity
-                  style={[styles.btn, styles.btnQuiet]}
-                  onPress={() => router.push('/pod' as never)}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.btnQuietText}>See how to set up Wi-Fi</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          )}
         </View>
+
+        <Text style={styles.line}>{COPY.line}</Text>
+
+        {/* Detaljerna, bara de som finns. Nätets namn när lådan har ett, och
+            kön bara när något faktiskt väntar — "Waiting: none" är en rad som
+            säger ingenting. */}
+        {netStatus !== null && (
+          <View style={styles.facts}>
+            {!!netStatus.ssid && <Fact styles={styles} label="Wi-Fi" value={netStatus.ssid} />}
+            {queued > 0 && (
+              <Fact
+                styles={styles}
+                label="Waiting"
+                value={`${queued} ${queued === 1 ? 'pause' : 'pauses'}`}
+                tone={queued >= QUEUE_NOTICE_FROM ? Palette.warning : undefined}
+              />
+            )}
+          </View>
+        )}
+
+        {state === 'away' && (
+          <TouchableOpacity
+            style={styles.btn}
+            onPress={connectToPausePod}
+            disabled={isScanning}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+          >
+            <Text style={styles.btnText}>{isScanning ? 'Looking…' : 'Find my pod'}</Text>
+          </TouchableOpacity>
+        )}
+
+        {(state === 'nowifi' || state === 'offline') && (
+          <TouchableOpacity
+            style={[styles.btn, styles.btnQuiet]}
+            onPress={() => router.push('/pod' as never)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+          >
+            <Text style={styles.btnQuietText}>Set up Wi-Fi</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
   );
 }
 
-function Row({
+function Fact({
   styles,
   label,
   value,
@@ -170,9 +180,9 @@ function Row({
   tone?: string;
 }) {
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={[styles.rowValue, tone ? { color: tone } : null]} numberOfLines={1}>
+    <View style={styles.fact}>
+      <Text style={styles.factLabel}>{label}</Text>
+      <Text style={[styles.factValue, tone ? { color: tone } : null]} numberOfLines={1}>
         {value}
       </Text>
     </View>
@@ -183,33 +193,29 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   gutter: { paddingHorizontal: Spacing.xl },
   backBtn: { alignSelf: 'flex-start', paddingVertical: 12, paddingRight: 12, marginBottom: 4 },
-  kicker: { ...Palette.eyebrow, marginBottom: Spacing.sm },
   title: {
-    fontSize: 34, lineHeight: 38, fontWeight: '900', letterSpacing: -0.6,
-    color: Palette.textPrimary, textTransform: 'uppercase',
+    fontSize: 30, lineHeight: 34, fontWeight: '900', letterSpacing: -0.4,
+    color: Palette.textPrimary,
   },
-  lead: {
-    fontSize: 16, lineHeight: 24, color: Palette.textSecondary,
-    marginTop: Spacing.sm, marginBottom: Spacing.xl,
+  answer: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, marginTop: 36 },
+  answerText: { flex: 1 },
+  // Svaret är display och ska läsas före allt annat på sidan — därför
+  // rummets kulör och inte brödtextens bläck.
+  word: { fontSize: 28, lineHeight: 32, fontWeight: '900', color: Palette.hue },
+  id: { ...Palette.eyebrow, marginTop: 4 },
+  line: {
+    fontSize: 16, lineHeight: 24, color: Palette.textSecondary, marginTop: Spacing.md,
   },
-  card: {
-    backgroundColor: Palette.surface, borderRadius: Radius.lg,
-    borderWidth: 1, borderColor: Palette.ink08, padding: Spacing.lg,
-  },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: Spacing.lg },
-  cardTitle: { fontSize: 16, fontWeight: '900', color: Palette.textPrimary, textTransform: 'uppercase' },
-  row: {
+  facts: { marginTop: 36 },
+  fact: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: Spacing.md, borderTopWidth: 1, borderTopColor: Palette.ink08, gap: Spacing.md,
+    paddingVertical: Spacing.md, borderTopWidth: 1, borderTopColor: Palette.ink08,
+    gap: Spacing.md,
   },
-  rowLabel: { fontSize: 15, color: Palette.textSecondary },
-  rowValue: { fontSize: 15, fontWeight: '600', color: Palette.textPrimary, flexShrink: 1 },
-  note: {
-    fontSize: 14, lineHeight: 21, color: Palette.textTertiary,
-    marginTop: Spacing.md,
-  },
+  factLabel: { fontSize: 15, color: Palette.textSecondary },
+  factValue: { fontSize: 15, fontWeight: '600', color: Palette.textPrimary, flexShrink: 1 },
   btn: {
-    marginTop: Spacing.lg, backgroundColor: Palette.accent, borderRadius: Radius.pill,
+    marginTop: 36, backgroundColor: Palette.accent, borderRadius: Radius.pill,
     paddingVertical: 14, alignItems: 'center',
   },
   btnText: { fontSize: 15, fontWeight: '600', color: Palette.onAccent },
