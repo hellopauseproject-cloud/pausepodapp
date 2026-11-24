@@ -2,7 +2,7 @@ import { FontAwesome, FontAwesome5, MaterialIcons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Animated, Image, Modal, Pressable, ScrollView, StyleSheet,
+  Alert, Animated, Image, ScrollView, StyleSheet,
   Text, TouchableOpacity, useWindowDimensions, View,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -103,15 +103,10 @@ function fmtIntention(raw: string | null, categoryMap: Record<string, string>) {
   return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
 }
 
-type MsgData = {
-  id: string; senderId: string; senderName: string;
-  text: string; delivered: boolean; createdAt: string;
-};
-
 type SessionItem = {
   id: string; durationSecs: number; intention: string | null;
   startedAt: string; sharedSessionId: string | null;
-  friendName: string | null; msg: MsgData | null;
+  friendName: string | null;
   /** Vilka som hjärtat pausen efteråt (supabase/pause_cheers.sql). */
   cheers: Cheerer[];
   withPod: boolean | null;
@@ -125,9 +120,6 @@ type SessionItem = {
   /** En paus som taggats som natt i efterhand — bara den går att ångra. */
   taggedAsSleep: boolean;
 };
-
-// Modul-nivå — överlever remount inom samma app-session
-const _readIds = new Set<string>();
 
 /**
  * Hör till **study-rummet** — Pause-rummet en trappa djupare in. Se ROOMS i
@@ -241,7 +233,6 @@ function StatsScreen() {
   // Hjärtat fylls först när raderna landat, inte medan de hämtas.
   const [loaded, setLoaded]           = useState(false);
   const [visibleCount, setVisibleCount] = useState(10);
-  const [selectedMsg, setSelectedMsg] = useState<MsgData | null>(null);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [nights, setNights] = useState<SleepNight[]>([]);
   // Natten som gäller nu, ur samma `get_night_progress` som Hem läser — så
@@ -289,31 +280,6 @@ function StatsScreen() {
         return globalWindows.some(w => a <= w.to + 60_000 && b >= w.from - 60_000);
       };
       const recent = rows;
-      const ids    = recent.map(r => r.id);
-
-      // Messages where I am receiver
-      let msgMap: Record<string, MsgData> = {};
-      if (ids.length > 0) {
-        const { data: msgs } = await supabase
-          .from('pause_messages')
-          .select('id, sender_id, session_id, text_content, delivered, created_at')
-          .eq('receiver_id', user.id)
-          .eq('message_type', 'text')
-          .in('session_id', ids);
-
-        const sIds = [...new Set((msgs ?? []).map(m => m.sender_id))];
-        let sMap: Record<string, string> = {};
-        if (sIds.length > 0) {
-          const { data: ps } = await supabase.from('profiles').select('id, username').in('id', sIds);
-          sMap = Object.fromEntries((ps ?? []).map(p => [p.id, p.username ?? '?']));
-        }
-        for (const m of (msgs ?? [])) {
-          msgMap[m.session_id] = {
-            id: m.id, senderId: m.sender_id, senderName: sMap[m.sender_id] ?? '?',
-            text: m.text_content ?? '', delivered: m.delivered ?? false, createdAt: m.created_at,
-          };
-        }
-      }
 
       // Hjärtan efter delade pauser. Bara delade pauser kan ha några, så
       // frågan begränsas till dem.
@@ -348,7 +314,6 @@ function StatsScreen() {
         startedAt: r.started_at ?? '',
         sharedSessionId: r.shared_session_id,
         friendName: r.shared_session_id ? (friendMap[r.shared_session_id] ?? null) : null,
-        msg: msgMap[r.id] ?? null,
         cheers: cheerMap[r.id] ?? [],
         withPod: r.with_pod ?? null,
         globalPause: r.kind !== 'sleep' && inGlobal(r.started_at, r.ended_at),
@@ -497,24 +462,6 @@ function StatsScreen() {
     ? Math.round(nights.reduce((s, n) => s + n.sleep_seconds, 0) / nights.length)
     : 0;
 
-  const openMsg = async (msg: MsgData) => {
-    setSelectedMsg(msg);
-    if (!msg.delivered && !_readIds.has(msg.id)) {
-      _readIds.add(msg.id);
-      setSessions(prev =>
-        prev.map(s =>
-          s.msg?.id === msg.id ? { ...s, msg: { ...s.msg!, delivered: true } } : s
-        )
-      );
-      const { error } = await supabase
-        .from('pause_messages')
-        .update({ delivered: true })
-        .eq('id', msg.id)
-        .eq('receiver_id', user!.id);
-      if (error) _readIds.delete(msg.id);
-    }
-  };
-
   useEffect(() => {
     if (focus !== 'recent' || scrolledRef.current || !loaded || recentY === null) return;
     scrolledRef.current = true;
@@ -617,7 +564,6 @@ function StatsScreen() {
       {sessions.length === 0 ? (
         <Animated.Text style={[styles.empty, { opacity: dataFadeAnim }]}>No pauses yet.</Animated.Text>
       ) : sessions.slice(0, visibleCount).map((s, i) => {
-        const isUnread = !!s.msg && !s.msg.delivered && !_readIds.has(s.msg.id);
         return (
           <Animated.View key={s.id} style={{ opacity: dataFadeAnim }}>
             <Swipeable
@@ -709,12 +655,6 @@ function StatsScreen() {
                       </View>
                     )}
                     {s.cheers.length > 0 && <CheerFaces cheers={s.cheers} styles={styles} Palette={Palette} />}
-                    {s.msg && (
-                      <TouchableOpacity style={styles.mailBtn} onPress={() => openMsg(s.msg!)} activeOpacity={0.65}>
-                        <FontAwesome5 name="envelope" size={13} color={isUnread ? Palette.accentSoft : Palette.ink20} />
-                        {isUnread && <View style={styles.unreadDot} />}
-                      </TouchableOpacity>
-                    )}
                   </View>
                 </View>
                 <View style={styles.sessionTags}>
@@ -788,20 +728,6 @@ function StatsScreen() {
           <Text style={styles.loadMoreText}>Show more</Text>
         </TouchableOpacity>
       )}
-
-      {/* Message modal */}
-      <Modal visible={!!selectedMsg} transparent animationType="fade" onRequestClose={() => setSelectedMsg(null)}>
-        <Pressable style={styles.overlay} onPress={() => setSelectedMsg(null)}>
-          <Pressable style={styles.msgCard} onPress={() => {}}>
-            <Text style={styles.msgSender}>{selectedMsg?.senderName}</Text>
-            <Text style={styles.msgText}>{selectedMsg?.text}</Text>
-            <Text style={styles.msgDate}>sent {selectedMsg ? fmtDate(selectedMsg.createdAt) : ''}</Text>
-            <TouchableOpacity style={styles.msgCloseBtn} onPress={() => setSelectedMsg(null)} activeOpacity={0.7}>
-              <Text style={styles.msgCloseTxt}>Close</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </ScrollView>
   );
 }
@@ -946,8 +872,6 @@ const makeStyles = (Palette: AppPalette, Night: AppPalette) => StyleSheet.create
   tagRemove: { alignSelf: 'flex-start', paddingVertical: 4 },
   tagRemoveText: { fontSize: 13, fontWeight: '600', color: Palette.textSecondary },
 
-  mailBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-
   // Hjärtan: ansiktet med ett litet hjärta i hörnet, ett per person.
   cheerRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   cheerFace: { width: 26, height: 26, borderRadius: 13 },
@@ -959,10 +883,6 @@ const makeStyles = (Palette: AppPalette, Night: AppPalette) => StyleSheet.create
     backgroundColor: Palette.surface, alignItems: 'center', justifyContent: 'center',
   },
   cheerMore: { fontSize: 12, color: Palette.textTertiary },
-  unreadDot: {
-    position: 'absolute', top: 6, right: 6,
-    width: 6, height: 6, borderRadius: 3, backgroundColor: Palette.accentSoft,
-  },
 
   loadMoreBtn: {
     alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 28,
@@ -983,22 +903,4 @@ const makeStyles = (Palette: AppPalette, Night: AppPalette) => StyleSheet.create
     borderRadius: 12, borderWidth: 1, borderColor: Palette.accentSoftTint,
     width: 44, height: 44,
   },
-
-  // Message modal
-  overlay: {
-    flex: 1, backgroundColor: Palette.scrimStrong,
-    justifyContent: 'center', alignItems: 'center', padding: 28,
-  },
-  msgCard: {
-    backgroundColor: Palette.modalSurface, borderRadius: Radius.xl, padding: 28,
-    width: '100%', gap: 16, borderWidth: 1, borderColor: alpha(Palette.accentSoft, 0.12),
-  },
-  msgSender: { fontSize: 12, color: Palette.ink40, letterSpacing: 2, textTransform: 'uppercase' },
-  msgText: { fontSize: 18, color: Palette.textPrimary, lineHeight: 28, fontWeight: '500' },
-  msgDate: { fontSize: 12, color: Palette.ink22, letterSpacing: 0.4 },
-  msgCloseBtn: {
-    alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 20,
-    borderRadius: Radius.pill, borderWidth: 1, borderColor: Palette.surfaceBorder, marginTop: 4,
-  },
-  msgCloseTxt: { color: Palette.ink45, fontSize: 14, letterSpacing: 0.8 },
 });

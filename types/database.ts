@@ -6,6 +6,8 @@ export type Profile = {
   is_pausing: boolean;
   onboarding_completed: boolean;
   created_at: string;
+  /** När användarvillkoren godkändes (supabase/moderation.sql). Null = inte än. */
+  terms_accepted_at?: string | null;
   /**
    * De tre kolumnerna nedan hörde till den gamla notiskedjan, som revs
    * (supabase/notifications-teardown.sql). **Två av dem är i bruk igen**, och
@@ -110,20 +112,6 @@ export type PauseSession = {
   awake_seconds: number | null;
   /** En paus taggad som natt i efterhand (supabase/sleep_tag.sql). */
   tagged_as_sleep?: boolean;
-};
-
-export type MessageType = 'voice' | 'video' | 'text';
-
-export type PauseMessage = {
-  id: string;
-  sender_id: string;
-  receiver_id: string;
-  session_id: string | null;
-  message_type: MessageType;
-  content_url: string | null;
-  text_content: string | null;
-  delivered: boolean;
-  created_at: string;
 };
 
 export type Circle = {

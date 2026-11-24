@@ -7,6 +7,7 @@ import { AppPalette, Radius, Spacing, alpha, darkPalette, lightPalette } from '.
 import { RoomProvider, ThemePreference, usePalette, useTheme } from '../contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PodBoxIcon } from '../components/pod-box-icon';
+import { openPrivacyPolicy, openTerms } from '../components/terms-checkbox';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { track } from '../lib/analytics';
 import { fetchMyTags, formatTagUid, type MyTag, removeMyTag } from '../lib/tagPairing';
@@ -350,6 +351,17 @@ function SettingsScreen() {
         {POD_COMING_SOON && <WaitlistPill />}
       </View>
 
+      {/* Villkoren och integritetspolicyn: en tyst rad sist, ingen ruta. */}
+      <View style={styles.legalRow}>
+        <TouchableOpacity onPress={openPrivacyPolicy} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }} accessibilityRole="link">
+          <Text style={styles.legalText}>Privacy Policy</Text>
+        </TouchableOpacity>
+        <Text style={styles.legalDot}>·</Text>
+        <TouchableOpacity onPress={openTerms} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }} accessibilityRole="link">
+          <Text style={styles.legalText}>Terms of Use</Text>
+        </TouchableOpacity>
+      </View>
+
     </DismissKeyboardView>
     </ScrollView>
   </KeyboardAvoidingView>
@@ -395,6 +407,21 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     borderColor: Palette.surfaceBorder,
     padding: Spacing.lg,
     marginBottom: 40,
+  },
+  legalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: -12,
+  },
+  legalText: {
+    fontSize: 13,
+    color: Palette.textTertiary,
+  },
+  legalDot: {
+    fontSize: 13,
+    color: Palette.ink40,
   },
   sectionTitle: {
     fontSize: 20,

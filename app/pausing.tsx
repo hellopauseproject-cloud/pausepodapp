@@ -271,7 +271,6 @@ function PausingScreen() {
   const restingRef = useRef(true);
   const rawFaceDownRef = useRef(false);
   const faceChangedAtRef = useRef<number | null>(null);
-  const lastFaceLogMsRef = useRef(0);
   // Har telefonen legat nedåt någon gång under den här pausen? Grinden för
   // uppåtljudet, och inte en optimering: `restingRef` startar `true` fast
   // telefonen per definition ligger i handen, så den första riktiga
@@ -466,17 +465,6 @@ function PausingScreen() {
         // nedan måste gå på i det ögonblick appen lämnas.
         rawFaceDownRef.current = down;
         if (!down) touchLockRef.current = false;
-
-        // Högst en rad i sekunden; tickarna dränker annars konsolen. Rot och
-        // acc är fönstrets toppar — det är dem trösklarna ska kalibreras mot.
-        if (nowMs - lastFaceLogMsRef.current > 1000) {
-          lastFaceLogMsRef.current = nowMs;
-          const s = assessStillness(win, nowMs);
-          console.log(
-            'FaceDown: z=', g.z.toFixed(2), 'nedåt=', down, 'vilar=', restingRef.current,
-            'rot=', s.maxRot?.toFixed(2) ?? '–', 'acc=', s.maxAcc?.toFixed(3) ?? '–', 'still=', s.still,
-          );
-        }
 
         if (down === restingRef.current) { faceChangedAtRef.current = null; return; }
         // Vägen in i vilan har två extra villkor, och vägen ut inga — att

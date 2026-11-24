@@ -1,7 +1,7 @@
 import { FontAwesome5 } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
@@ -13,6 +13,7 @@ import { roomShell, ScreenBackground } from '../components/screen-background';
 import { LETTER_PAPER } from '../components/support-envelope';
 import { useHand } from '../lib/handFont';
 import { SupportHeartButton } from '../components/support-heart-button';
+import { useModeration } from '../components/moderation';
 
 // Samma höjd som PAUSE på Hem.
 // Mindre än PAUSE på Hem: knappen är ett val bland tre, inte sidans huvudsak.
@@ -49,6 +50,11 @@ function TextMessageScreen() {
     }>();
 
   const [isSending, setIsSending] = useState(false);
+  // Långtryck på brevet: Report (components/moderation.tsx).
+  const moderation = useModeration();
+  const reportLetter = isSupport === 'true' && messageId
+    ? () => moderation.openContentMenu({ contentType: 'support', contentId: messageId })
+    : undefined;
   const sendProgress = useRef(new Animated.Value(0)).current;
 
   const translateY = sendProgress.interpolate({ inputRange: [0, 1], outputRange: [0, -240] });
@@ -116,6 +122,7 @@ function TextMessageScreen() {
           handskrivna och linjerna ritas med samma steg som texten. */}
       <View style={styles.messageArea}>
         <Animated.View style={[styles.letter, { opacity: letterIn, transform: [{ translateY: letterRise }, { rotate: '-1.2deg' }] }]}>
+          <Pressable style={styles.letterInner} onLongPress={reportLetter} delayLongPress={350} disabled={!reportLetter}>
           <View style={styles.letterHead}>
             {senderAvatarUrl ? (
               <Image source={{ uri: senderAvatarUrl }} style={styles.letterAvatar} />
@@ -136,6 +143,7 @@ function TextMessageScreen() {
               <Text style={[styles.letterText, hand(18), { lineHeight: LINE }]}>{textContent}</Text>
             </View>
           </ScrollView>
+          </Pressable>
         </Animated.View>
       </View>
 
@@ -162,6 +170,7 @@ function TextMessageScreen() {
           </TouchableOpacity>
         </Animated.View>
       </View>
+      {moderation.element}
     </View>
   );
 }
@@ -190,6 +199,8 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     paddingBottom: 24,
     justifyContent: 'center',
   },
+  // Bär brevets gap: långtrycket ligger runt huvudet och texten.
+  letterInner: { gap: 14, flexShrink: 1 },
   letter: {
     backgroundColor: LETTER_PAPER.paper,
     borderRadius: 10,
@@ -199,7 +210,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 18,
     maxHeight: '100%',
-    gap: 14,
     ...Palette.cardShadow,
   },
   letterHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },

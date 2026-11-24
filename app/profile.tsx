@@ -304,26 +304,57 @@ function ProfileScreen() {
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.signOutButton}
-        onPress={() =>
-          Alert.alert('Log out', 'Are you sure?', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Log out', style: 'destructive', onPress: signOut },
-          ])
-        }
-      >
-        <FontAwesome name="sign-out" size={15} color={Palette.textFaint} />
-        <Text style={styles.signOutText}>Log out</Text>
-      </TouchableOpacity>
+      {/* Kontot: en panel med tre rader och hårfina linjer emellan.
+          Rapportera och blockera görs på personen (⋯ i listorna); här står
+          bara vägen tillbaka (app/blocked-users.tsx). */}
+      <Text style={styles.accountLabel}>Account</Text>
+      <View style={styles.accountPanel}>
+        <TouchableOpacity
+          style={styles.accountRow}
+          onPress={() => router.push('/blocked-users' as never)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+        >
+          <View style={styles.accountIcon}>
+            <FontAwesome5 name="ban" size={14} color={Palette.textTertiary} />
+          </View>
+          <Text style={styles.accountRowText}>Blocked users</Text>
+          <FontAwesome5 name="chevron-right" size={12} color={Palette.textTertiary} />
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.deleteAccountButton}
-        onPress={() => setDeleteStep('confirm')}
-        accessibilityRole="button"
-      >
-        <Text style={styles.deleteAccountText}>Delete account</Text>
-      </TouchableOpacity>
+        <View style={styles.accountDivider} />
+
+        <TouchableOpacity
+          style={styles.accountRow}
+          onPress={() =>
+            Alert.alert('Log out', 'Are you sure?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Log out', style: 'destructive', onPress: signOut },
+            ])
+          }
+          activeOpacity={0.7}
+          accessibilityRole="button"
+        >
+          <View style={styles.accountIcon}>
+            <FontAwesome5 name="sign-out-alt" size={14} color={Palette.textTertiary} />
+          </View>
+          <Text style={styles.accountRowText}>Log out</Text>
+        </TouchableOpacity>
+
+        <View style={styles.accountDivider} />
+
+        <TouchableOpacity
+          style={styles.accountRow}
+          onPress={() => setDeleteStep('confirm')}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+        >
+          <View style={styles.accountIcon}>
+            <FontAwesome5 name="trash-alt" size={13} color={Palette.danger} />
+          </View>
+          <Text style={[styles.accountRowText, styles.accountRowDanger]}>Delete account</Text>
+        </TouchableOpacity>
+      </View>
 
     </ScrollView>
 
@@ -532,26 +563,43 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  signOutButton: {
+  accountLabel: {
+    ...Palette.eyebrow,
+    marginBottom: 10,
+    marginLeft: 4,
+  },
+  // Ingen kant: ytan skiljer sig redan från botten, och raderna går ut i
+  // kanten med hårfina linjer emellan (samma layoutspråk som Kretsens panel).
+  accountPanel: {
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
+  accountRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    marginBottom: 20,
+    gap: 12,
+    minHeight: 52,
+    paddingHorizontal: Spacing.lg,
   },
-  signOutText: {
-    color: Palette.textTertiary,
-    fontSize: 14,
-  },
-  deleteAccountButton: {
+  accountIcon: {
+    width: 20,
     alignItems: 'center',
-    paddingVertical: 12,
-    marginBottom: 20,
   },
-  deleteAccountText: {
+  accountRowText: {
+    flex: 1,
+    fontSize: 15,
+    color: Palette.textPrimary,
+  },
+  accountRowDanger: {
     color: Palette.danger,
-    fontSize: 14,
+  },
+  // Linjen börjar där texten börjar, så att ikonerna står i en egen kolumn.
+  accountDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Palette.divider,
+    marginLeft: Spacing.lg + 20 + 12,
   },
   deleteBtnDanger: {
     backgroundColor: Palette.danger,

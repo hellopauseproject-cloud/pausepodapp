@@ -141,6 +141,11 @@ export const CIRCLE_CHAT_TYPE = 'circle_chat';
 export const SUPPORT_REQUEST_TYPE = 'support_request';
 export const SUPPORT_RECEIVED_TYPE = 'support_received';
 export const PAUSE_INVITE_TYPE = 'pause_invite';
+/**
+ * En ny rapport, bara till granskarens konton (`report_admin_ids` i
+ * notify_config, supabase/moderation.sql; edge-funktionen notify-report).
+ */
+export const REPORT_TYPE = 'report';
 
 /**
  * Påminnelsen om den globala pausen, 10 minuter före (lib/globalPause.ts).
@@ -161,6 +166,7 @@ const GLOBAL_PAUSE_REMINDER_LEAD_MS = 10 * 60_000;
 /** Alla typer som kommer som push, alltså handlar om någon annan. */
 const PUSH_TYPES = new Set([
   CIRCLE_GOAL_TYPE, CIRCLE_CHAT_TYPE, SUPPORT_REQUEST_TYPE, SUPPORT_RECEIVED_TYPE, PAUSE_INVITE_TYPE,
+  REPORT_TYPE,
 ]);
 
 /**

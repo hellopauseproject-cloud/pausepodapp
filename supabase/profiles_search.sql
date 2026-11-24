@@ -95,6 +95,8 @@ as $$
   select p.id, p.username, p.avatar_url
     from profiles p, q
    where p.id <> auth.uid()
+     -- Blockerade åt något håll syns inte (moderation.sql, körs före).
+     and not private.blocked_pair(auth.uid(), p.id)
      and (
        (length(q.raw) >= 3 and p.username ilike '%' || q.pat || '%' escape '\')
        -- Kortare namn än tre tecken: bara hela namnet duger.

@@ -3,7 +3,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
 import { closeSupportViewer } from '../lib/supportOpen';
@@ -12,6 +12,7 @@ import { AppPalette, Radius } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
 import { SupportHeartButton } from '../components/support-heart-button';
+import { useModeration } from '../components/moderation';
 
 /**
  * Hör till **friends-rummet**. Rummet följer ärendet och inte filträdet — se
@@ -49,6 +50,8 @@ function VoiceScreen() {
   const supportResponseIdRef = useRef<string | null>(null);
   // Hjärtat behöver id:t efter att ref:en nollats vid stängning.
   const [responseId, setResponseId] = useState<string | null>(null);
+  // Långtryck på avsändaren: Report (components/moderation.tsx).
+  const moderation = useModeration();
 
   useEffect(() => {
     if (voiceStatus.didJustFinish) {
@@ -153,7 +156,11 @@ function VoiceScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.callerInfo}>
+      <Pressable
+        style={styles.callerInfo}
+        onLongPress={responseId ? () => moderation.openContentMenu({ contentType: 'support', contentId: responseId }) : undefined}
+        delayLongPress={350}
+      >
         {callerPhoto ? (
           <Image source={{ uri: callerPhoto }} style={styles.avatar} />
         ) : (
@@ -165,7 +172,7 @@ function VoiceScreen() {
         <Text style={styles.callerSubtitle}>
           {noFile ? 'No message to play' : showReplay ? 'Message finished' : voiceStatus.playing ? 'Playing…' : 'Opening…'}
         </Text>
-      </View>
+      </Pressable>
 
       <View style={styles.buttons}>
         <SupportHeartButton responseId={responseId} senderName={callerName || 'A friend'} />
@@ -188,6 +195,7 @@ function VoiceScreen() {
           <Text style={styles.closeText}>Close</Text>
         </TouchableOpacity>
       </View>
+      {moderation.element}
     </View>
   );
 }

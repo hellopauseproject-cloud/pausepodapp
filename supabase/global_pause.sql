@@ -324,6 +324,9 @@ begin
       from global_pause_joins g
       join profiles p on p.id = g.user_id
      where g.starts_at = v_starts
+       -- Blockerade åt något håll syns inte i rummet (moderation.sql).
+       -- Talen i `counts` räknar dem ändå: siffran är rummets, inte listans.
+       and not private.blocked_pair(v_me, g.user_id)
   ),
   ranked as (
     select r.*, row_number() over (

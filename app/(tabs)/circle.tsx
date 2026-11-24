@@ -23,6 +23,7 @@ import { alpha, AppPalette, Radius, roomPalette, Spacing } from '../../constants
 import { RoomProvider, usePalette, useTheme } from '../../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../../components/screen-background';
 import { CircleIntentions } from '../../components/circle-intentions';
+import { ProfileCard } from '../../components/profile-card';
 import { useAuth } from '../../contexts/AuthContext';
 import { safeBottom } from '../../lib/bottomInset';
 import { track } from '../../lib/analytics';
@@ -1147,6 +1148,12 @@ function CircleScreen() {
   const [menuPage, setMenuPage] = useState<'menu' | 'members'>('menu');
   const [friendStatus, setFriendStatus] = useState<Record<string, 'accepted' | 'pending'>>({});
   const [addingFriendId, setAddingFriendId] = useState<string | null>(null);
+  // Ett tryck på en medlem öppnar hens kort (components/profile-card.tsx):
+  // kretsarna, *Add friend*, och ⋯ med Report och Block. Kortet läggs ovanpå
+  // medlemslistan i samma Modal (`inline`). Den blockerade ligger kvar i
+  // kretsen; det som döljs (chatten, flödet) sköts av databasen
+  // (supabase/moderation.sql).
+  const [memberCard, setMemberCard] = useState<MemberRow | null>(null);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
 
   const [showGoalModal, setShowGoalModal] = useState(false);
@@ -1520,6 +1527,19 @@ function CircleScreen() {
     });
     setAddingFriendId(null);
     if (error) { Alert.alert('Could not send request', error.message); return; }
+    setFriendStatus(prev => ({ ...prev, [targetId]: 'pending' }));
+  };
+
+  // Kortets *Add friend*: samma insert som listans knapp, men kastar, så att
+  // kortet kan säga det.
+  const addFriendFromCard = async (targetId: string) => {
+    if (!user) return;
+    const { error } = await supabase.from('friendships').insert({
+      requester_id: user.id,
+      receiver_id: targetId,
+      status: 'pending',
+    });
+    if (error) throw new Error(error.message);
     setFriendStatus(prev => ({ ...prev, [targetId]: 'pending' }));
   };
 
@@ -2099,7 +2119,8 @@ function CircleScreen() {
           Ett ark nerifrån, som att göra-arket och taggkortet. Två sidor i
           samma kort (`menuPage`): menyn, och medlemslistan ett steg in. */}
       <Modal visible={showMembersModal} transparent animationType="fade" onRequestClose={() => {
-        if (menuPage === 'members') setMenuPage('menu');
+        if (memberCard) setMemberCard(null);
+        else if (menuPage === 'members') setMenuPage('menu');
         else setShowMembersModal(false);
       }}>
         <View style={styles.sheetBackdrop}>
@@ -2254,13 +2275,22 @@ function CircleScreen() {
                 const canRemove = iAmOwner && !isMe;
                 return (
                   <View key={m.id} style={styles.memberListRow}>
-                    <Avatar username={m.username} avatarUrl={m.avatar_url} size={38} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.memberListName} numberOfLines={1}>
-                        {m.username}{isMe ? ' (you)' : ''}
-                      </Text>
-                      {m.role === 'owner' && <Text style={styles.memberListRole}>Owner</Text>}
-                    </View>
+                    <TouchableOpacity
+                      style={styles.memberListPerson}
+                      onPress={() => setMemberCard(m)}
+                      disabled={isMe}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={isMe ? undefined : `Open ${m.username}'s profile`}
+                    >
+                      <Avatar username={m.username} avatarUrl={m.avatar_url} size={38} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.memberListName} numberOfLines={1}>
+                          {m.username}{isMe ? ' (you)' : ''}
+                        </Text>
+                        {m.role === 'owner' && <Text style={styles.memberListRole}>Owner</Text>}
+                      </View>
+                    </TouchableOpacity>
 
                     {/* Ingen knapp för en själv. "Pending" utan riktning är
                         med flit: en väntande förfrågan kan gå åt båda hållen,
@@ -2311,6 +2341,19 @@ function CircleScreen() {
             </>
             )}
           </View>
+          {/* Sist, så att kortet ligger över medlemslistan. */}
+          {memberCard && (
+            <ProfileCard
+              inline
+              data={{
+                id: memberCard.id, username: memberCard.username, avatar_url: memberCard.avatar_url,
+                kind: 'member', friendStatus: friendStatus[memberCard.id] ?? null,
+              }}
+              onClose={() => setMemberCard(null)}
+              onAddFriend={addFriendFromCard}
+              onBlocked={u => setFriendStatus(prev => { const n = { ...prev }; delete n[u.id]; return n; })}
+            />
+          )}
         </View>
       </Modal>
 
@@ -2437,6 +2480,7 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
 
   memberList: { maxHeight: 340, marginHorizontal: -Spacing.xs },
   memberListRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.sm },
+  memberListPerson: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   memberListName: { fontSize: 15, fontWeight: '700', color: Palette.textPrimary },
   memberListRole: { fontSize: 12, color: Palette.textTertiary, marginTop: 1 },
   memberListMuted: { fontSize: 13, color: Palette.textTertiary },

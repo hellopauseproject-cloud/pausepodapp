@@ -170,6 +170,9 @@ begin
      where p.id = m.user_id
        and m.circle_id = new.circle_id
        and m.user_id  <> new.user_id
+       -- Den som blockerat avsändaren ser inte meddelandet (moderation.sql),
+       -- och ska då inte heller knackas om det.
+       and not exists (select 1 from blocks b where b.blocker_id = m.user_id and b.blocked_id = new.user_id)
        and p.push_token is not null
        and push_is_daytime(p.tz_offset_minutes)
        and (m.chat_notified_at is null

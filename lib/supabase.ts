@@ -1,11 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
-// Den riktiga databasen är förval. För att köra appen mot testprojektet
-// (t.ex. för lådans taggregistrering) sätts båda i en .env.local:
-//   EXPO_PUBLIC_SUPABASE_URL=https://xmbifegxahijdkvykjdb.supabase.co
-//   EXPO_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_…
-// och Expo startas om. Inloggningen gäller då bara testprojektets konton.
+// Den riktiga databasen är förval. EXPO_PUBLIC_SUPABASE_URL och
+// EXPO_PUBLIC_SUPABASE_ANON_KEY i en .env.local pekar om appen till ett
+// annat projekt (och Expo startas om).
 const SUPABASE_URL =
   process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://iwyumzgewiwvcbuqzjnk.supabase.co';
 const SUPABASE_ANON_KEY =

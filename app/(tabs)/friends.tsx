@@ -36,8 +36,7 @@ import {
 import { RoomProvider, usePalette } from '../../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../../components/screen-background';
 import { PausePodLogo } from '../../components/pause-pod-logo';
-import { CircleLevelBadge } from '../../components/circle-level-badge';import { circleLevelName } from '../../lib/circleLevels';
-import { FriendCircleBadge, getFriendCircleBadge, getMyCircles } from '../../lib/circles';
+import { ProfileCard, ProfileCardData } from '../../components/profile-card';
 import { track } from '../../lib/analytics';
 import { enablePushNotifications } from '../../lib/notifications';
 import { isPausingNow } from '../../lib/pausingFlag';
@@ -47,6 +46,7 @@ import {
 } from '../../lib/supportStories';
 import { fetchSealedSupport, SealedSupport } from '../../lib/supportSealed';
 import { intentionTone } from '../../components/pause-tag-chips';
+import { ModerationUser, useModeration } from '../../components/moderation';
 import type { PauseSession, Profile } from '../../types/database';
 import { Category, DEFAULT_CATEGORIES, getSelectedCategories } from '../pauseLogger';
 
@@ -128,20 +128,6 @@ type SessionMap = Record<string, {
   latest: PauseSession | null;
 }>;
 
-type ProfileCardData = {
-  id: string; username: string; avatar_url: string | null;
-  kind: 'request';
-  friendshipId: string;
-  onAccept: () => void;
-  onDecline: () => void;
-} | {
-  id: string; username: string; avatar_url: string | null;
-  kind: 'friend';
-  friendshipId: string;
-  statusText: string | null;
-  isPausing: boolean;
-};
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Äldre pauser än så här visas inte under en väns namn. */
@@ -182,204 +168,6 @@ function Avatar({ username, avatarUrl, size = 44 }: { username: string; avatarUr
         {username[0]?.toUpperCase() ?? '?'}
       </Text>
     </View>
-  );
-}
-
-function ProfileCard({ data, onClose, onRemoveFriend }: {
-  data: ProfileCardData;
-  onClose: () => void;
-  onRemoveFriend?: (friendshipId: string, friendId: string) => void;
-}) {
-  const Palette = usePalette();
-  const styles = useMemo(() => makeStyles(Palette), [Palette]);
-  const { user } = useAuth();
-
-  // Ens egna kretsar och om vännen redan är med i (eller inbjuden till) var
-  // och en — hämtas när kortet öppnas, samma skäl som kretsmärket nedan.
-  // Samma frågor som app/circle-invite.tsx ställer.
-  const [myCircles, setMyCircles] = useState<{ id: string; name: string; state: 'open' | 'in' | 'sent' | 'sending' }[] | null>(null);
-  const [circlePicker, setCirclePicker] = useState(false);
-  const [inviteError, setInviteError] = useState('');
-  useEffect(() => {
-    if (data.kind !== 'friend' || !user?.id) return;
-    let alive = true;
-    (async () => {
-      const circles = await getMyCircles(user.id);
-      if (circles.length === 0) { if (alive) setMyCircles([]); return; }
-      const ids = circles.map(c => c.id);
-      const [{ data: members }, { data: pending }] = await Promise.all([
-        supabase.from('circle_members').select('circle_id').eq('user_id', data.id).in('circle_id', ids),
-        supabase.from('circle_invites').select('circle_id').eq('invitee_id', data.id).eq('status', 'pending').in('circle_id', ids),
-      ]);
-      const inSet = new Set((members ?? []).map((m: any) => m.circle_id));
-      const sentSet = new Set((pending ?? []).map((i: any) => i.circle_id));
-      if (alive) setMyCircles(circles.map(c => ({
-        id: c.id, name: c.name,
-        state: inSet.has(c.id) ? 'in' : sentSet.has(c.id) ? 'sent' : 'open',
-      })));
-    })();
-    return () => { alive = false; };
-  }, [data.id, data.kind, user?.id]);
-
-  const inviteToCircle = async (circleId: string) => {
-    setInviteError('');
-    setMyCircles(prev => prev?.map(c => c.id === circleId ? { ...c, state: 'sending' } : c) ?? prev);
-    const { error } = await supabase.rpc('invite_to_circle', { p_circle_id: circleId, p_invitee_id: data.id });
-    if (error) {
-      setInviteError(error.message);
-      setMyCircles(prev => prev?.map(c => c.id === circleId ? { ...c, state: 'open' } : c) ?? prev);
-      return;
-    }
-    track('circle_invite_sent', { from: 'friend_card' });
-    setMyCircles(prev => prev?.map(c => c.id === circleId ? { ...c, state: 'sent' } : c) ?? prev);
-  };
-
-  const confirmRemove = () => {
-    if (data.kind !== 'friend') return;
-    Alert.alert(
-      `Remove ${data.username}?`,
-      'You will no longer see each other in your friend lists.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => { onRemoveFriend?.(data.friendshipId, data.id); onClose(); } },
-      ],
-    );
-  };
-
-  const circleLabel = (c: { state: 'open' | 'in' | 'sent' | 'sending' }) =>
-    c.state === 'in' ? 'In circle' : c.state === 'sent' ? 'Invited' : c.state === 'sending' ? 'Sending…' : 'Invite';
-  const onlyCircle = myCircles?.length === 1 ? myCircles[0] : null;
-
-  // Hämtas när kortet öppnas och inte i listans load(): listan ritar upp till
-  // åtta rader, och åtta RPC-anrop för något som syns först vid ett tryck är
-  // åtta anrop för mycket. Samma skäl som medlemslistan i Kretsen hämtar sina
-  // vänskapsrelationer först när modalen öppnas.
-  const [circle, setCircle] = useState<FriendCircleBadge | null>(null);
-  useEffect(() => {
-    let alive = true;
-    getFriendCircleBadge(data.id).then(c => { if (alive) setCircle(c); });
-    return () => { alive = false; };
-  }, [data.id]);
-
-  return (
-    <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.cardBackdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={() => {}}>
-          <Avatar username={data.username} avatarUrl={data.avatar_url} size={80} />
-          <Text style={styles.cardName}>{data.username}</Text>
-
-          {/* Kretsen, om hen är med i någon. Nivån är kretsens gemensamma och
-              inte hens egen — därför står kretsnamnet överst och nivån under
-              som dess egenskap, inte tvärtom. Raden uteblir helt när svaret
-              är null: "ingen krets" är inget kortet behöver säga. */}
-          {circle && (circle.circles?.length ?? 1) <= 1 && (
-            <View style={styles.cardCircle}>
-              <CircleLevelBadge level={circle.level} size={44} />
-              <View style={styles.cardCircleText}>
-                {/* Etiketten säger vad namnet under den är. Utan den står ett
-                    egennamn ensamt på ett kort och kan lika gärna vara
-                    vad som helst. */}
-                <Text style={styles.cardCircleEyebrow}>CIRCLE</Text>
-                <Text style={styles.cardCircleName} numberOfLines={1}>{circle.circle_name}</Text>
-                <Text style={styles.cardCircleLevel} numberOfLines={1}>LEVEL {circle.level}</Text>
-                <Text style={styles.cardCircleLevelName} numberOfLines={1}>
-                  {circleLevelName(circle.level)}
-                </Text>
-              </View>
-            </View>
-          )}
-          {/* Två eller tre kretsar: en rad per krets, märke + namn + nivå.
-              Nivåns namn faller bort — tre rader med fyra rader text var
-              hade gjort kortet till en lista om kretsar i stället för om
-              personen. Det står kvar i kretsens egen stege. */}
-          {circle && (circle.circles?.length ?? 1) > 1 && (
-            <View style={[styles.cardCircle, styles.cardCircleList]}>
-              <Text style={styles.cardCircleEyebrow}>CIRCLES</Text>
-              {circle.circles!.map((c, i) => (
-                <View key={`${c.circle_name}-${i}`} style={styles.cardCircleListRow}>
-                  <CircleLevelBadge level={c.level} size={32} />
-                  <Text style={[styles.cardCircleName, styles.cardCircleListName]} numberOfLines={1}>
-                    {c.circle_name}
-                  </Text>
-                  <Text style={styles.cardCircleLevel} numberOfLines={1}>LEVEL {c.level}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-          {data.kind === 'friend' && data.statusText && (
-            <Text style={[styles.cardStatus, data.isPausing && styles.cardStatusActive]}>
-              {data.statusText}
-            </Text>
-          )}
-          {/* Bjud in till en krets: med en krets är det ett tryck, med fler
-              fäller knappen ut en rad per krets. Utan krets syns den inte. */}
-          {data.kind === 'friend' && myCircles && myCircles.length > 0 && (
-            <View style={styles.cardInviteBlock}>
-              {onlyCircle ? (
-                <TouchableOpacity
-                  style={[styles.cardInviteBtn, onlyCircle.state !== 'open' && styles.cardInviteBtnDone]}
-                  onPress={() => inviteToCircle(onlyCircle.id)}
-                  disabled={onlyCircle.state !== 'open'}
-                  activeOpacity={0.85}
-                  accessibilityRole="button"
-                >
-                  <FontAwesome5 name="user-plus" size={13} color={onlyCircle.state === 'open' ? Palette.onAccent : Palette.textTertiary} />
-                  <Text style={[styles.cardInviteBtnText, onlyCircle.state !== 'open' && styles.cardInviteBtnTextDone]} numberOfLines={1}>
-                    {onlyCircle.state === 'open' ? `Invite to ${onlyCircle.name}` : `${circleLabel(onlyCircle)} · ${onlyCircle.name}`}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    style={styles.cardInviteBtn}
-                    onPress={() => setCirclePicker(v => !v)}
-                    activeOpacity={0.85}
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded: circlePicker }}
-                  >
-                    <FontAwesome5 name="user-plus" size={13} color={Palette.onAccent} />
-                    <Text style={styles.cardInviteBtnText}>Invite to circle</Text>
-                    <FontAwesome5 name={circlePicker ? 'chevron-up' : 'chevron-down'} size={11} color={Palette.onAccent} />
-                  </TouchableOpacity>
-                  {circlePicker && myCircles.map(c => (
-                    <View key={c.id} style={styles.cardInviteRow}>
-                      <Text style={styles.cardInviteRowName} numberOfLines={1}>{c.name}</Text>
-                      <TouchableOpacity
-                        style={[styles.acceptBtn, c.state !== 'open' && styles.declineBtn]}
-                        onPress={() => inviteToCircle(c.id)}
-                        disabled={c.state !== 'open'}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={c.state === 'open' ? styles.acceptBtnText : styles.declineBtnText}>{circleLabel(c)}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </>
-              )}
-              {!!inviteError && <Text style={styles.cardInviteError}>{inviteError}</Text>}
-            </View>
-          )}
-          {data.kind === 'friend' && onRemoveFriend && (
-            <TouchableOpacity onPress={confirmRemove} activeOpacity={0.7} style={styles.cardRemove} hitSlop={8}>
-              <Text style={styles.cardRemoveText}>Remove friend</Text>
-            </TouchableOpacity>
-          )}
-          {data.kind === 'request' && (
-            <Text style={styles.cardStatus}>Wants to add you</Text>
-          )}
-          {data.kind === 'request' && (
-            <View style={styles.cardActions}>
-              <TouchableOpacity style={styles.acceptBtn} onPress={() => { data.onAccept(); onClose(); }} activeOpacity={0.8}>
-                <Text style={styles.acceptBtnText}>Accept</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.declineBtn} onPress={() => { data.onDecline(); onClose(); }} activeOpacity={0.8}>
-                <Text style={styles.declineBtnText}>Decline</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </Pressable>
-      </Pressable>
-    </Modal>
   );
 }
 
@@ -1030,7 +818,7 @@ function StoryDetailModal({
   items, initialIndex, myUserId, friendNames,
   respondedMap, onUndoResponse,
   onRespondText, onRespondVoice, onRespondVideo, onRespondPhoto,
-  onDeactivateOwn, onClose,
+  onDeactivateOwn, onClose, onReport,
 }: {
   items: SupportStory[];
   initialIndex: number;
@@ -1045,6 +833,8 @@ function StoryDetailModal({
   onRespondPhoto: (storyId: string, ownerName: string) => void;
   onDeactivateOwn: () => Promise<void>;
   onClose: () => void;
+  /** Långtryck på en väns förfrågan: Report (components/moderation.tsx). */
+  onReport: (story: SupportStory) => void;
 }) {
   const Palette = usePalette();
   const storyModalStyles = useMemo(() => makeStoryModalStyles(Palette), [Palette]);
@@ -1083,6 +873,14 @@ function StoryDetailModal({
               not i ungefär samma vikt, centrerat. Inget ledde. Nu är
               aktiviteten ensam stor, allt annat är dess sammanhang — och de
               tre delarna skiljs av linjer i stället för av tomrum. */}
+          {/* Långtryck på någon annans förfrågan rapporterar den. Den egna
+              har inget långtryck. */}
+          <Pressable
+            style={storyModalStyles.reportWrap}
+            onLongPress={isOwn ? undefined : () => onReport(item)}
+            delayLongPress={350}
+            disabled={isOwn}
+          >
           <View style={storyModalStyles.ownContentCard}>
             <View style={storyModalStyles.askBlock}>
               {intentionEmoji && (
@@ -1129,6 +927,7 @@ function StoryDetailModal({
                 är ledigt. */}
             <Text style={storyModalStyles.timeLeftText}>{storyTimeLeft(item)}</Text>
           </View>
+          </Pressable>
 
           {isOwn && (
             <Text style={storyModalStyles.audienceText}>
@@ -1282,6 +1081,19 @@ function FriendsScreen() {
   const [recentSupport, setRecentSupport] = useState(0);
 
   // Vänradernas tryck, stabila så att `FriendRow`s memo håller.
+  // Rapportera och blockera bor på profilkortet (⋯ uppe till höger). En
+  // blockerad försvinner ur listan direkt; vänskapen och inbjudningarna rivs
+  // i databasen (supabase/moderation.sql), och omhämtningen visar resten.
+  // Den här instansen är bara för långtrycket på en väns stödförfrågan.
+  const handleBlocked = (u: ModerationUser) => {
+    setFriends(prev => prev.filter(f => f.id !== u.id));
+    const current = getPauseInviteSelection();
+    if (current.some(f => f.id === u.id)) setPauseInviteSelection(current.filter(f => f.id !== u.id));
+    refreshAfterBlockRef.current();
+  };
+  const moderation = useModeration({ onBlocked: handleBlocked });
+  const refreshAfterBlockRef = useRef<() => void>(() => {});
+
   const openFriendProfile = useCallback((friend: Friend, statusText: string | null) => {
     setProfileCard({ ...friend, kind: 'friend', statusText, isPausing: friend.is_pausing });
   }, []);
@@ -1666,6 +1478,8 @@ function FriendsScreen() {
 
   // Samma delete som ett avböjande, på en accepterad rad. Vännen tas också
   // ur pausinbjudans val, annars bjöds en före detta vän in vid nästa paus.
+  refreshAfterBlockRef.current = () => { fetchAll(); fetchInvites(); fetchStories(); };
+
   const removeFriend = async (friendshipId: string, friendId: string) => {
     setFriends(prev => prev.filter(f => f.friendshipId !== friendshipId));
     const current = getPauseInviteSelection();
@@ -1796,6 +1610,7 @@ function FriendsScreen() {
   }
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: Math.max(60, insets.top + 8) }]}
@@ -1925,7 +1740,12 @@ function FriendsScreen() {
 
       {/* Profilkort */}
       {profileCard && (
-        <ProfileCard data={profileCard} onClose={() => setProfileCard(null)} onRemoveFriend={removeFriend} />
+        <ProfileCard
+          data={profileCard}
+          onClose={() => setProfileCard(null)}
+          onRemoveFriend={removeFriend}
+          onBlocked={handleBlocked}
+        />
       )}
 
       {/* Dela en punkt som story — steg 1 vad, steg 2 i vilken ton */}
@@ -2194,10 +2014,20 @@ function FriendsScreen() {
               setStoryModalIndex(null);
             }}
             onClose={() => setStoryModalIndex(null)}
+            onReport={story => {
+              // Samma skäl som profilkortet: läsaren stängs innan arket öppnas.
+              setStoryModalIndex(null);
+              setTimeout(() => moderation.openContentMenu({
+                contentType: 'support', contentId: story.id, userId: story.user_id,
+              }), 350);
+            }}
           />
         );
       })()}
     </ScrollView>
+    {/* Utanför rullningen: toasten är absolut placerad. */}
+    {moderation.element}
+    </View>
   );
 }
 
@@ -2436,51 +2266,6 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   emptyState: { paddingVertical: 24, alignItems: 'center', gap: 10 },
   emptyText: { color: Palette.textTertiary, fontSize: 14 },
 
-  // Profile card modal
-  cardBackdrop: { flex: 1, backgroundColor: Palette.scrimStrong, alignItems: 'center', justifyContent: 'center' },
-  card: {
-    backgroundColor: Palette.modalSurface, borderRadius: Radius.xl, borderWidth: 1, borderColor: Palette.modalBorder,
-    paddingVertical: 32, paddingHorizontal: 24, alignItems: 'center', gap: 12,
-    width: '88%', maxWidth: 380,
-  },
-  cardInviteBlock: { alignSelf: 'stretch', gap: 8, marginTop: 4 },
-  cardInviteBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: Palette.accent, borderRadius: Radius.pill, paddingVertical: 12, paddingHorizontal: 16,
-  },
-  cardInviteBtnDone: { backgroundColor: 'transparent', borderWidth: 1, borderColor: Palette.surfaceBorder },
-  cardInviteBtnText: { color: Palette.onAccent, fontSize: 14, fontWeight: '700', flexShrink: 1 },
-  cardInviteBtnTextDone: { color: Palette.textTertiary },
-  cardInviteRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: Palette.ink05, borderRadius: Radius.md, paddingVertical: 8, paddingHorizontal: 12,
-  },
-  cardInviteRowName: { flex: 1, fontSize: 14, fontWeight: '600', color: Palette.textPrimary },
-  cardInviteError: { color: Palette.danger, fontSize: 13, textAlign: 'center' },
-  cardRemove: { marginTop: 4, paddingVertical: 6 },
-  cardRemoveText: { color: Palette.danger, fontSize: 14, fontWeight: '600' },
-  cardName: { fontSize: 20, fontWeight: '700', color: Palette.textPrimary, letterSpacing: 0.2, textAlign: 'center' },
-  // Ligger i en egen tonad yta för att skilja hemvist från status: den ena
-  // säger vem hen pausar med, den andra vad hen gör just nu.
-  cardCircle: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    alignSelf: 'stretch',
-    backgroundColor: Palette.ink05,
-    borderRadius: Radius.md,
-    paddingVertical: 10, paddingHorizontal: 12,
-    marginTop: 4,
-  },
-  cardCircleText: { flex: 1, gap: 3, alignItems: 'flex-start' },
-  cardCircleEyebrow: { ...Palette.eyebrow },
-  cardCircleName: { fontSize: 15, fontWeight: '700', color: Palette.textPrimary },
-  cardCircleLevel: { fontSize: 12, fontWeight: '900', color: Palette.hue, letterSpacing: 1 },
-  cardCircleLevelName: { fontSize: 13, fontWeight: '600', color: Palette.textSecondary },
-  cardCircleList: { flexDirection: 'column', alignItems: 'stretch', gap: 8 },
-  cardCircleListRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  cardCircleListName: { flex: 1 },
-  cardStatus: { fontSize: 14, color: Palette.textTertiary, textAlign: 'center' },
-  cardStatusActive: { color: Palette.accent },
-  cardActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
 
   friendsLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   addFriendLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -2609,6 +2394,7 @@ const makeStoryModalStyles = (Palette: AppPalette) => StyleSheet.create({
     color: Palette.peer,
     letterSpacing: 2,
   },
+  reportWrap: { width: '100%' },
   ownContentCard: {
     width: '100%',
     backgroundColor: Palette.ink04,

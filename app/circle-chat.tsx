@@ -11,6 +11,7 @@ import { AppPalette, Radius, Spacing } from '../constants/appTheme';
 import { useAuth } from '../contexts/AuthContext';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
+import { useModeration } from '../components/moderation';
 import {
   CHAT_PAGE_SIZE, ChatMessage, deleteCircleMessage, fetchCircleMessages,
   markCircleChatRead, sendCircleMessage,
@@ -103,6 +104,7 @@ function CircleChatScreen() {
   const Palette = usePalette();
   const styles = useMemo(() => makeStyles(Palette), [Palette]);
   const { user } = useAuth();
+  const moderation = useModeration();
   const insets = useSafeAreaInsets();
 
   // Tangentbordets höjd, mätt för hand. På Android gör `adjustResize`
@@ -262,7 +264,12 @@ function CircleChatScreen() {
   };
 
   const handleLongPress = (m: ChatMessage) => {
-    if (m.user_id !== user?.id) return;
+    // Andras meddelanden: bara Report. Blockeringen bor på personen, inte
+    // på ett meddelande (components/moderation.tsx).
+    if (m.user_id !== user?.id) {
+      if (m.user_id) moderation.openContentMenu({ contentType: 'message', contentId: m.id });
+      return;
+    }
     Alert.alert('Delete message?', m.body, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -429,6 +436,7 @@ function CircleChatScreen() {
         </TouchableOpacity>
       </View>
       )}
+      {moderation.element}
     </KeyboardAvoidingView>
   );
 }

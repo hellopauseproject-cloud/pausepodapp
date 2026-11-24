@@ -47,79 +47,7 @@ export type GlobalPause = {
 /** Från det här blir raden på Hem tydlig. */
 export const GLOBAL_PAUSE_NEAR_MS = 2 * 60 * 60_000;
 
-/**
- * Demo för att se rummet medan en global paus pågår, utan att röra databasen:
- * påhittade personer, och anmälan lever bara i minnet. `__DEV__` gör att den
- * aldrig kan nå en riktig version. Sätt `false` när du sett det du ville.
- */
-export const GLOBAL_PAUSE_DEMO = __DEV__ && false;
-
-const DEMO_NAMES = ['hugo', 'ida_m', 'leo', 'alma', 'nils', 'tuva', 'adam', 'freja', 'sam', 'vera', 'kim', 'ebba', 'milo', 'stina'];
-
-const DEMO_EXTRA = 24;
-
-export type DemoPhase = 'before' | 'live' | 'done';
-
-let demoPhase: DemoPhase = 'live';
-let demoStart = Date.now() - 5 * 60_000;
-let demoMe: { intention_id: string | null; started: boolean } | null = null;
-
-/** Knapparna längst upp i rummet medan demot är på. */
-export function setDemoPhase(phase: DemoPhase) {
-  demoPhase = phase;
-  demoStart = Date.now() + (phase === 'before' ? 80 : phase === 'done' ? 24 * 60 : -5) * 60_000;
-}
-
-function buildDemo(): GlobalPause {
-  const iso = (ms: number) => new Date(ms).toISOString();
-  const row = (
-    key: number, relation: GlobalPauseRelation, name: string | null,
-    intention_id: string | null, state: GlobalPauseState, minutes: number,
-  ): GlobalPausePerson => ({
-    key, relation, name, avatar_url: null, intention_id, state,
-    seconds: minutes * 60 + (state === 'pausing' ? Math.floor((Date.now() - demoStart) / 1000) - 300 : 0),
-    running: state === 'pausing',
-  });
-  const people = [
-    row(2, 'circle', 'Anna', 'read', 'pausing', 5),
-    row(3, 'circle', 'Steve', 'walk', 'on_hold', 3),
-    row(4, 'friend', 'Lina', 'focus', 'pausing', 4),
-    row(5, 'friend', 'Omar', 'clean', 'done', 4),
-    row(6, 'stranger', 'maria_k', 'meditate', 'pausing', 5),
-    row(7, 'stranger', 'jonas', 'workout', 'pausing', 2),
-    row(8, 'stranger', 'noor', null, 'pausing', 3),
-    row(9, 'stranger', 'elsa.b', 'nature', 'signed_up', 0),
-    row(10, 'stranger', 'theo', 'create', 'on_hold', 2),
-    row(11, 'stranger', 'sofia', 'rest', 'pausing', 1),
-    ...['read', 'focus', 'clean', 'walk', 'create', 'music', 'rest', 'study', 'nature', 'meditate', 'social', 'read', 'focus', 'walk']
-      .map((id, i) => row(12 + i, 'stranger', DEMO_NAMES[i], id, i % 5 === 4 ? 'on_hold' : 'pausing', 2 + (i % 4))),
-  ];
-  for (let i = 0; i < DEMO_EXTRA; i++) {
-    people.push(row(30 + i, 'stranger', `pauser${i + 1}`, 'read', 'pausing', 1 + (i % 6)));
-  }
-  if (demoPhase === 'before') {
-    people.forEach(p => { p.state = 'signed_up'; p.running = false; p.seconds = 0; });
-  }
-  if (demoMe) people.unshift(row(1, 'me', 'You', demoMe.intention_id, 'signed_up', 0));
-  return {
-    starts_at: iso(demoStart),
-    ends_at: iso(demoStart + 60 * 60_000),
-    opens_at: iso(demoStart - 10 * 60_000),
-    closes_at: iso(demoStart + 30 * 60_000),
-    server_now: iso(Date.now()),
-    me: demoMe,
-    counts: {
-      signed_up: people.length,
-      pausing: people.filter(p => p.running).length,
-      total_seconds: people.reduce((sum, p) => sum + p.seconds, 0),
-    },
-    people,
-    last: demoPhase === 'done' ? { starts_at: iso(demoStart), people: 24, total_seconds: 41 * 60 * 60, was_there: true } : null,
-  };
-}
-
 export async function fetchGlobalPause(): Promise<GlobalPause | null> {
-  if (GLOBAL_PAUSE_DEMO) return buildDemo();
   const { data, error } = await supabase.rpc('get_global_pause');
   if (error || !data) return null;
   return data as GlobalPause;
@@ -127,7 +55,6 @@ export async function fetchGlobalPause(): Promise<GlobalPause | null> {
 
 /** Att anmäla sig igen byter bara intention. Kastar med serverns mening. */
 export async function joinGlobalPause(intentionId: string | null): Promise<void> {
-  if (GLOBAL_PAUSE_DEMO) { demoMe = { intention_id: intentionId, started: false }; return; }
   const { data, error } = await supabase.rpc('join_global_pause', { p_intention_id: intentionId });
   if (error) throw new Error(error.message);
   track('global_pause_joined', { intention: intentionId });
@@ -135,7 +62,6 @@ export async function joinGlobalPause(intentionId: string | null): Promise<void>
 }
 
 export async function leaveGlobalPause(): Promise<void> {
-  if (GLOBAL_PAUSE_DEMO) { demoMe = null; return; }
   const { error } = await supabase.rpc('leave_global_pause');
   if (error) throw new Error(error.message);
   track('global_pause_left');
@@ -184,21 +110,14 @@ export function rejoinGlobalPause(startsAt: string): void {
  */
 export async function takeGlobalPauseResult(): Promise<GlobalPauseResult | null> {
   let result: GlobalPauseResult | null = null;
-  if (GLOBAL_PAUSE_DEMO) {
-    result = demoMe ? { starts_at: new Date(demoStart).toISOString(), seconds: 0, people: 24, total_seconds: 41 * 3600 } : null;
-  } else {
-    try {
-      const { data, error } = await supabase.rpc('get_my_last_global_result');
-      if (!error && data) result = data as GlobalPauseResult;
-    } catch {
-      result = null;
-    }
+  try {
+    const { data, error } = await supabase.rpc('get_my_last_global_result');
+    if (!error && data) result = data as GlobalPauseResult;
+  } catch {
+    result = null;
   }
   if (!result || summarized.has(result.starts_at)) return null;
   summarized.add(result.starts_at);
-  // Demot: rummet går tillbaka till före-vyn för nästa, och anmälan gällde den
-  // som var.
-  if (GLOBAL_PAUSE_DEMO) { setDemoPhase('before'); demoMe = null; }
   return result;
 }
 

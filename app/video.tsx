@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { setAudioModeAsync } from 'expo-audio';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
@@ -13,6 +13,7 @@ import { AppPalette } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { SupportHeartButton } from '../components/support-heart-button';
 import { PauseButtonFace } from '../components/pause-button-face';
+import { useModeration } from '../components/moderation';
 
 const PAUSE_BTN_H = 36;
 
@@ -30,6 +31,8 @@ export default function VideoScreen() {
   const supportResponseIdRef = useRef<string | null>(null);
   // Hjärtat behöver id:t efter att ref:en nollats vid stängning.
   const [responseId, setResponseId] = useState<string | null>(null);
+  // Långtryck på videon: Report (components/moderation.tsx).
+  const moderation = useModeration();
 
   // Ingen upplyftningston, ingen egen kamerabild i hörnet och ingen röd lur:
   // videosvaret såg ut som ett FaceTime-samtal (och krävde kamerabehörighet
@@ -126,11 +129,17 @@ export default function VideoScreen() {
           <Text style={styles.noFileText}>No message to play</Text>
         </View>
       ) : (
-        <View style={styles.videoWrapper}>
+        <Pressable
+          style={styles.videoWrapper}
+          onLongPress={responseId ? () => moderation.openContentMenu({ contentType: 'support', contentId: responseId }) : undefined}
+          delayLongPress={350}
+        >
           <VideoView
             style={styles.video}
             player={player}
             nativeControls={false}
+            // Trycken ska nå långtrycket runt videon, inte den nativa vyn.
+            pointerEvents="none"
           />
           {showReplay && (
             <TouchableOpacity
@@ -143,7 +152,7 @@ export default function VideoScreen() {
               <MaterialIcons name="replay" size={64} color="white" />
             </TouchableOpacity>
           )}
-        </View>
+        </Pressable>
       )}
 
       {!!callerName && (
@@ -171,6 +180,7 @@ export default function VideoScreen() {
           <Text style={styles.closeText}>Close</Text>
         </TouchableOpacity>
       </View>
+      {moderation.element}
     </View>
   );
 }

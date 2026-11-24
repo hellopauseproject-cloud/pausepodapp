@@ -19,6 +19,8 @@ import { signInWithApple } from '../../lib/appleAuth';
 import { AppleSignInButton } from '../../components/apple-sign-in-button';
 import DismissKeyboardView from '../components/DismissKeyboardView';
 import { PausePodLogo } from '../../components/pause-pod-logo';
+import { TermsCheckbox } from '../../components/terms-checkbox';
+import { noteTermsAgreedBeforeSignIn } from '../../lib/moderation';
 
 export default function SignUpScreen() {
   const Palette = usePalette();
@@ -33,6 +35,11 @@ export default function SignUpScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const busy = loading || googleLoading || appleLoading;
   const [done, setDone] = useState(false);
+  // Krävs för alla tre vägarna in: e-post, Apple och Google. Den som loggar
+  // in med Google från inloggningssidan i stället möts av grinden
+  // (components/terms-gate.tsx).
+  const [agreed, setAgreed] = useState(false);
+  const TERMS_REQUIRED = 'Please agree to the Terms of Use.';
 
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const emailInputRef = useRef<TextInput>(null);
@@ -49,6 +56,11 @@ export default function SignUpScreen() {
   };
 
   const handleSignUp = async () => {
+    if (!agreed) {
+      setError(TERMS_REQUIRED);
+      shake();
+      return;
+    }
     if (!email.trim()) {
       setError('Enter your email address.');
       shake();
@@ -79,6 +91,12 @@ export default function SignUpScreen() {
   };
 
   const handleGoogleSignIn = async () => {
+    if (!agreed) {
+      setError(TERMS_REQUIRED);
+      shake();
+      return;
+    }
+    noteTermsAgreedBeforeSignIn();
     setGoogleLoading(true);
     setError('');
     const { error: err } = await signInWithGoogle();
@@ -91,6 +109,12 @@ export default function SignUpScreen() {
   };
 
   const handleAppleSignIn = async () => {
+    if (!agreed) {
+      setError(TERMS_REQUIRED);
+      shake();
+      return;
+    }
+    noteTermsAgreedBeforeSignIn();
     setAppleLoading(true);
     setError('');
     const { error: err } = await signInWithApple();
@@ -173,6 +197,7 @@ export default function SignUpScreen() {
             returnKeyType="done"
             onSubmitEditing={handleSignUp}
           />
+          <TermsCheckbox checked={agreed} onChange={v => { setAgreed(v); if (v && error === TERMS_REQUIRED) setError(''); }} />
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </Animated.View>
 

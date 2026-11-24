@@ -2,7 +2,7 @@
   "expo": {
     "name": "PausePod",
     "slug": "Pause-app",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "pauseapp",
@@ -62,6 +62,9 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACTIVITY_RECOGNITION"
       ],
       "package": "com.pausepod.app",
       "googleServicesFile": "./google-services.json"

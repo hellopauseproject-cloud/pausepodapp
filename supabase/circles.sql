@@ -1690,10 +1690,17 @@ begin
     return null;
   end if;
 
+  -- En vänskapsrad åt något håll, eller en delad krets: kretsens
+  -- medlemslista öppnar samma kort (components/profile-card.tsx), och den
+  -- man pausar med i en krets ska kunna se vilka andra kretsar hen hör till.
   if not exists (
     select 1 from friendships
      where (requester_id = auth.uid() and receiver_id = p_user_id)
         or (requester_id = p_user_id and receiver_id = auth.uid())
+  ) and not exists (
+    select 1 from circle_members a
+      join circle_members b on b.circle_id = a.circle_id
+     where a.user_id = auth.uid() and b.user_id = p_user_id
   ) then
     return null;
   end if;

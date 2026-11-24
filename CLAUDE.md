@@ -784,8 +784,13 @@ avsändarens ansikte med ett litet hjärta, på mottagarens paus.
   kan läsa raden.
 - **Ingen notis.** Antalet hjärtan beror på hur aktiva andra är — se
   notisavsnittet högst upp.
-- Gamla hälsningar ligger kvar i `pause_messages` och visas som förut,
-  bakom kuvertet på kortet.
+- Gamla hälsningar ligger kvar i `pause_messages` men visas inte längre
+  (november 2026): kuvertet på statistikens kort är borttaget, för tre
+  oöppnade hälsningar från september–oktober låg begravda under dussintals
+  nyare pauser. Tabellen och bucketarna `voice-messages`/`video-message(s)`
+  rivs i en senare release; tills dess står de kvar i `ACCOUNT_BUCKETS`
+  (contexts/AuthContext.tsx) och i `delete_my_account()`, som måste radera
+  raderna eftersom de har `no action` mot profiles.
 - Hjärtats kulör är `dangerSoft`, rosa: ett hjärta läses bara som ett hjärta
   i den färgen. Det är inte `danger`, som är Finish och raderingar.
 
@@ -1253,6 +1258,64 @@ Protokollet och reglerna för pausposter bor i
   gör bucketen privat och körs **först när alla har en app med
   signeringen** — en äldre app spelar annars inte upp någonting.
 
+### Rapportera, blockera och användarvillkoren
+
+Krav från Google Plays regler för användargenererat innehåll (november
+2026), och det ska stämma med villkoren på
+`joinpausepod.com/privacypolicy/#terms`. Schemat i
+[supabase/moderation.sql](supabase/moderation.sql) (körs **före appen**, och
+därefter `profiles_search.sql`, `global_pause.sql` och `social_notify.sql`
+igen, som läser `private.blocked_pair()`), klienten i
+[lib/moderation.ts](lib/moderation.ts) och arken i
+[components/moderation.tsx](components/moderation.tsx).
+
+- **Var det finns:** långtryck på någon annans innehåll ger bara *Report* —
+  chatten, en väns stödförfrågan, och de fyra visningsskärmarna för stöd
+  (brev, foto, röst, video). ⋯ på en person ger *Report* och *Block*: uppe
+  till höger på profilkortet ([components/profile-card.tsx](components/profile-card.tsx)),
+  och på raderna i *Add friend*-sökningen, som inte har något kort. Kortet
+  öppnas med ett tryck på en vän eller förfrågan i Friends och på en medlem
+  i kretsens medlemslista; där ligger det ovanpå listan (`inline`) och visar
+  kretsarna och *Add friend*. ⋯ stod först på varje rad i vänlistan och
+  flyttade till kortet på begäran, och *Remove friend* flyttade in i samma
+  meny (neutral, överst) — kortet är personen, menyn relationen. Kortets
+  *Invite to circle* har PAUSE-knappens material och versaler, och *Add
+  friend* på en kretsmedlems kort är fylld i rummets `hue` — grön i Kretsen,
+  under grönregelns tredje undantag (rummet, inte en bekräftelse). Båda på
+  begäran.
+  *Blocked users ›* står i profilen ([app/blocked-users.tsx](app/blocked-users.tsx)).
+- **`useModeration()` är en hook, inte en provider**, så att arket tillhör
+  rummet det öppnades från. `moderation.element` ska stå i skärmens rot och
+  inte i en ScrollView (toasten är absolut), och arket öppnas med en paus
+  efter ett annat Modal — två Modal ovanpå varandra fungerar inte på iOS.
+  Undantaget är `inline`: då ritas arket som ett lager inne i ett Modal som
+  redan står uppe, och det används i kretsens medlemslista så att arket
+  lägger sig ovanpå listan i stället för att ersätta den.
+- **Blockeringen gäller åt båda hållen, utom i kretsen.** Vänskapen och
+  väntande inbjudningar rivs av en trigger, ny vänförfrågan och nytt stöd
+  spärras, och personerna syns inte i sökningen, i Global Pause-rummet eller
+  i kretsens flöde. I en delad krets ligger båda kvar, och bara den som
+  blockerat slipper den andras chattmeddelanden (och chattnotisen). Den
+  blockerade får aldrig veta. Unblock lägger inte tillbaka vänskapen.
+- **`private.blocked_pair()` ligger utanför `public` med flit**: i `public`
+  hade den gått att anropa över PostgREST och svarat på om någon blockerat
+  en.
+- **`reports` läses bara i dashboarden** — insert-grant, ingen select.
+  Appen rapporterar genom `report_content`, som slår upp vem som skrev
+  innehållet och sparar en kopia (`content_snapshot`): raderas meddelandet
+  ska granskningen ha något kvar. Det är det enda stället appen kopierar
+  någons text, och det är skälet. En trigger postar till edge-funktionen
+  `notify-report`, som skickar push till kontona i
+  `notify_config.report_admin_ids` och mejl via Resend om `RESEND_API_KEY`
+  är satt. Den pushen är granskarens och räknas inte bland appens notiser.
+- **Villkoren godkänns en gång** (`profiles.terms_accepted_at`, satt av
+  servern i `accept_terms()`). Registreringen kräver kryssrutan för alla tre
+  vägarna; e-postkontot bär tiden i `user_metadata` tills en session finns,
+  Google och Apple i minnet. Alla andra möts av
+  [components/terms-gate.tsx](components/terms-gate.tsx), ett lager över
+  hela stacken i app/_layout.tsx, så att ingen väg in går förbi det. Ett
+  läsfel släpper förbi, samma linje som `onboarding_completed`.
+
 ### Inloggningen: e-post, Google, och Apple på iOS
 
 **Sign in with Apple finns på inloggningen och registreringen, bara på iOS**
@@ -1272,8 +1335,12 @@ lika. `google-services.json` måste vara Firebase-filen för
 
 ### Radera kontot
 
-**Längst ner i profilen, under *Log out*** (november 2026, krav från App
-Store och Google Play): *Delete account* → *Delete your account?* med vad som
+**Längst ner i profilen, sista raden i panelen *Account*** (november 2026,
+krav från App Store och Google Play). Panelen är *Blocked users ›*, *Log
+out* och *Delete account* (i `danger`) med hårfina linjer emellan, i stället
+för tre lösa knappar i olika former. *Privacy Policy · Terms of Use* står
+som en tyst rad sist i Settings (`openPrivacyPolicy`/`openTerms` i
+components/terms-checkbox.tsx). *Delete account* → *Delete your account?* med vad som
 raderas → en nedräkning från 5 med *Cancel* → raderingen, och grinden skickar
 till inloggningen. `deleteAccount` i [contexts/AuthContext.tsx](contexts/AuthContext.tsx),
 `delete_my_account()` i [supabase/delete_account.sql](supabase/delete_account.sql)
@@ -3139,9 +3206,10 @@ SQL-editorn (samma konvention som RPC-kommentaren högst upp i
     inte timmar, inte mål. Nivån är kretsens gemensamma — det finns ingen
     personlig nivå i systemet, och kortet får inte antyda att det gör det.
     Därför står kretsnamnet överst och nivån under som dess egenskap.
-  - Kräver en vänskapsrad åt något håll, **oavsett status**: kortet öppnas
-    både för accepterade vänner och för inkommande förfrågningar, och den som
-    frågar om att få lägga till dig ska kunna visa vilken krets hen hör till.
+  - Kräver en vänskapsrad åt något håll, **oavsett status**, eller en delad
+    krets: kortet öppnas för accepterade vänner, för inkommande förfrågningar
+    och från kretsens medlemslista, och den som frågar om att få lägga till
+    dig ska kunna visa vilken krets hen hör till.
   - `null` betyder både "ingen krets" och "inte vänner", och kortet skiljer
     inte på dem — ett "hen är med i en krets men du får inte se vilken" vore
     att läcka just det som inte lämnas ut. Raden uteblir helt.

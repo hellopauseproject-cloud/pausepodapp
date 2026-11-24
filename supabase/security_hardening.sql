@@ -59,12 +59,14 @@ drop policy if exists "users can select own friendships" on public.friendships;
 -- Skapas egentligen i pausing_flag.sql; här så att filen går att köra i
 -- vilken ordning som helst mot den.
 alter table public.profiles add column if not exists pausing_until timestamptz;
+-- Skapas i moderation.sql, av samma skäl här.
+alter table public.profiles add column if not exists terms_accepted_at timestamptz;
 
 revoke select on public.profiles from authenticated, anon;
 grant select (
   id, username, avatar_url, show_stats, created_at, onboarding_completed,
   is_pausing, tz_offset_minutes, daily_target_seconds,
-  pausing_until
+  pausing_until, terms_accepted_at
 ) on public.profiles to authenticated;
 
 -- Dubbletter.

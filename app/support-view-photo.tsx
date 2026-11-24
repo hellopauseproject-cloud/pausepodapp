@@ -1,7 +1,7 @@
 import { FontAwesome5 } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openPauseStart } from '../lib/pauseFlow';
 import { supabase } from '../lib/supabase';
@@ -13,6 +13,7 @@ import {
 import { AppPalette, Radius } from '../constants/appTheme';
 import { usePalette } from '../contexts/ThemeContext';
 import { SupportHeartButton } from '../components/support-heart-button';
+import { useModeration } from '../components/moderation';
 
 // Samma höjd som PAUSE på Hem.
 // Mindre än PAUSE på Hem: knappen är ett val bland tre, inte sidans huvudsak.
@@ -45,6 +46,8 @@ export default function SupportViewPhotoScreen() {
     }>();
 
   const [frameH, setFrameH] = useState(0);
+  // Långtryck på bilden: Report (components/moderation.tsx).
+  const moderation = useModeration();
   const [bandH, setBandH] = useState(0);
 
   const markDelivered = async () => {
@@ -79,7 +82,13 @@ export default function SupportViewPhotoScreen() {
     <View style={styles.container}>
       <View style={styles.frame} onLayout={e => setFrameH(e.nativeEvent.layout.height)}>
         {photoUrl ? (
-          <Image source={{ uri: photoUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onLongPress={messageId ? () => moderation.openContentMenu({ contentType: 'photo', contentId: messageId }) : undefined}
+            delayLongPress={350}
+          >
+            <Image source={{ uri: photoUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          </Pressable>
         ) : (
           <View style={[StyleSheet.absoluteFill, styles.missing]}>
             <FontAwesome5 name="image" size={32} color={Palette.ink30} />
@@ -130,6 +139,7 @@ export default function SupportViewPhotoScreen() {
           <Text style={styles.declineText}>Not a good time</Text>
         </TouchableOpacity>
       </View>
+      {moderation.element}
     </View>
   );
 }

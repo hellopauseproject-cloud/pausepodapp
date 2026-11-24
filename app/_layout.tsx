@@ -25,6 +25,7 @@ import { closePauseInvites, finishPauseInvite } from '../lib/pauseInvites';
 import { clearStalePausingFlag, setPausingFlag } from '../lib/pausingFlag';
 import { markNightEnded, nextMidnight } from '../lib/homeMode';
 import { saveSleepSession } from '../lib/sleep';
+import { TermsGate } from '../components/terms-gate';
 import { clearSessionCheckpoint, findCategoryById, loadSessionCheckpoint, logPause } from './pauseLogger';
 
 // Hur färskt ett notistryck måste vara för att få styra vart appen landar vid
@@ -45,7 +46,7 @@ function InnerLayout() {
   const { mode } = useTheme();
   const Palette = usePalette();
   const { state: sessionState, dispatch: sessionDispatch } = useSession();
-  const { user, loading, onboardingCompleted } = useAuth();
+  const { user, loading, onboardingCompleted, termsAccepted } = useAuth();
 
   // Introduktionen kan vara uppskjuten i stället för körd — se `deferIntro` i
   // [lib/introPrefs.ts](../lib/introPrefs.ts) för varför det krävs en egen
@@ -581,7 +582,7 @@ function InnerLayout() {
   }, [loading, user, onboardingCompleted, introDeferred, onAuthCallback]);
 
   const showOverlay =
-    loading || (!!user && (onboardingCompleted === null || introDeferred === null));
+    loading || (!!user && (onboardingCompleted === null || introDeferred === null || termsAccepted === null));
 
   /**
    * React Navigations egna teman bär `background: rgb(242,242,242)` respektive
@@ -620,6 +621,7 @@ function InnerLayout() {
         <Stack.Screen name="pausing" options={{ headerShown: false }} />
         <Stack.Screen name="stats" options={{ headerShown: false }} />
         <Stack.Screen name="profile" options={{ headerShown: false }} />
+        <Stack.Screen name="blocked-users" options={{ headerShown: false }} />
         <Stack.Screen name="add-friend" options={{ headerShown: false }} />
         <Stack.Screen name="support-history" options={{ headerShown: false }} />
         <Stack.Screen name="pair" options={{ headerShown: false }} />
@@ -648,6 +650,8 @@ function InnerLayout() {
         <Stack.Screen name="text-message" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
+      {/* Användarvillkoren, en gång, över allt annat — se components/terms-gate.tsx. */}
+      {!!user && termsAccepted === false && segments[0] !== 'auth' && <TermsGate />}
       {showOverlay && (
         <View
           style={{ position: 'absolute', inset: 0, backgroundColor: Palette.bg }}

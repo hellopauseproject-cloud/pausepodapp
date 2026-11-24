@@ -22,6 +22,7 @@ import type { Profile } from '../types/database';
 import { AppPalette, Radius, Spacing } from '../constants/appTheme';
 import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { roomShell, ScreenBackground } from '../components/screen-background';
+import { MoreButton, useModeration } from '../components/moderation';
 
 /*
   Sökningen går via RPC:n `search_profiles`, som ligger i
@@ -102,6 +103,11 @@ function AddFriendScreen() {
   const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [existingRelationIds, setExistingRelationIds] = useState<Set<string>>(new Set());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // En blockerad försvinner ur träffarna direkt; nästa sökning hittar hen
+  // inte heller, för search_profiles filtrerar på blockeringen.
+  const moderation = useModeration({
+    onBlocked: u => setResults(prev => prev.filter(p => p.id !== u.id)),
+  });
 
   // Ladda befintliga relationer för filtrering
   useEffect(() => {
@@ -225,11 +231,16 @@ function AddFriendScreen() {
                   {sent ? 'Sent' : 'Add'}
                 </Text>
               </TouchableOpacity>
+              <MoreButton
+                username={profile.username}
+                onPress={() => moderation.openUserMenu({ id: profile.id, username: profile.username })}
+              />
             </View>
           );
         })}
       </View>
       </DismissKeyboardView>
+      {moderation.element}
     </KeyboardAvoidingView>
   );
 }
@@ -302,7 +313,9 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingLeft: 16,
+    // ⋯ är 44 bred med ikonen i mitten, och får stå närmare kanten.
+    paddingRight: 4,
     backgroundColor: Palette.surface,
     borderRadius: Radius.md,
     borderWidth: 1,

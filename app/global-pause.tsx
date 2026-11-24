@@ -10,7 +10,7 @@ import Animated, {
   withRepeat, withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { GlobeGrid } from '../components/globe-grid';
 import { HoldToStartButton } from '../components/hold-to-start-button';
@@ -23,9 +23,8 @@ import { RoomProvider, usePalette } from '../contexts/ThemeContext';
 import { safeBottom } from '../lib/bottomInset';
 import { formatDuration } from '../lib/circles';
 import {
-  DemoPhase, fetchGlobalPause, fetchTotalPausedSeconds, formatCountdown, formatGlobalPauseWhen, formatTotalPaused,
-  GLOBAL_PAUSE_DEMO, GlobalPause,
-  GlobalPausePerson, joinGlobalPause, rejoinGlobalPause, setDemoPhase, wasSummarized,
+  fetchGlobalPause, fetchTotalPausedSeconds, formatCountdown, formatGlobalPauseWhen, GlobalPause,
+  GlobalPausePerson, joinGlobalPause, rejoinGlobalPause, wasSummarized,
 } from '../lib/globalPause';
 import { GLOBAL_PAUSE_NAME, notificationsBlocked, scheduleGlobalPauseReminder } from '../lib/notifications';
 import { HOLD_TO_START_MS, startPhonePause } from '../lib/pauseFlow';
@@ -119,6 +118,30 @@ export default function GlobalPauseRoom() {
         <GlobalPauseScreen />
       </View>
     </RoomProvider>
+  );
+}
+
+/** Ribbonens tre toner (CLAUDE.md, *Pausa tillsammans*): himmel, mint, aprikos. */
+const RIBBON = ['#8CC4FF', '#7FE0B0', '#FFB77D'] as const;
+const RULE_W = 28;
+
+/** Ett hårstreck i ribbonens toner som tonar bort utåt, på var sin sida om
+ *  *PAUSED TOGETHER*. Vänster går himmel → mint, höger mint → aprikos, så att
+ *  de två tillsammans läser som ett band genom ordet. */
+function RibbonRule({ side }: { side: 'left' | 'right' }) {
+  const id = `totalRule-${side}`;
+  const [a, b] = side === 'left' ? [RIBBON[0], RIBBON[1]] : [RIBBON[1], RIBBON[2]];
+  return (
+    <Svg width={RULE_W} height={2}>
+      <Defs>
+        <LinearGradient id={id} x1="0" y1="0" x2="1" y2="0">
+          <Stop offset="0" stopColor={a} stopOpacity={side === 'left' ? 0 : 0.9} />
+          <Stop offset="0.5" stopColor={side === 'left' ? a : b} stopOpacity={0.9} />
+          <Stop offset="1" stopColor={b} stopOpacity={side === 'left' ? 0.9 : 0} />
+        </LinearGradient>
+      </Defs>
+      <Rect x={0} y={0} width={RULE_W} height={2} rx={1} fill={`url(#${id})`} />
+    </Svg>
   );
 }
 
@@ -276,26 +299,30 @@ function GlobalPauseScreen() {
       >
         <FontAwesome5 name="chevron-left" size={15} color={Palette.textSecondary} />
       </TouchableOpacity>
-      {GLOBAL_PAUSE_DEMO && (
-        <View style={s.demoRow}>
-          {(['before', 'live', 'done'] as DemoPhase[]).map(p => (
-            <TouchableOpacity key={p} onPress={() => { setDemoPhase(p); load(); }} hitSlop={6}>
-              <Text style={s.demoText}>{p}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
       <View style={s.back} />
     </View>
   );
 
   // Alltid samma höjd, också innan talet kommit, så att klotet inte hoppar.
+  // Talet i displayens 900 med enheterna små och dämpade, och under det en
+  // kicker mellan två hårstreck i ribbonens tre toner — samma färger som
+  // raden på Hem och klotet bakom glorian. Tonar in när talet landat.
   const totalLine = (
     <View style={s.totalSlot}>
       {totalSeconds !== null && (
-        <Text style={s.totalText} numberOfLines={1}>
-          <Text style={s.totalNumber}>{formatTotalPaused(totalSeconds)}</Text> paused together
-        </Text>
+        <Animated.View entering={FadeIn.duration(700)} style={s.totalInner}>
+          <Text style={s.totalNumberRow} numberOfLines={1} adjustsFontSizeToFit>
+            <Text style={s.totalNumber}>{Math.floor(totalSeconds / 3600)}</Text>
+            <Text style={s.totalUnit}> h  </Text>
+            <Text style={s.totalNumber}>{Math.floor(totalSeconds / 60) % 60}</Text>
+            <Text style={s.totalUnit}> m</Text>
+          </Text>
+          <View style={s.totalKickerRow}>
+            <RibbonRule side="left" />
+            <Text style={s.totalKicker}>PAUSED TOGETHER</Text>
+            <RibbonRule side="right" />
+          </View>
+        </Animated.View>
       )}
     </View>
   );
@@ -560,12 +587,14 @@ const makeStyles = (Palette: AppPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent', paddingHorizontal: Spacing.xl },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: -Spacing.sm },
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  demoRow: { flexDirection: 'row', gap: 16 },
-  demoText: { fontSize: 12, color: Palette.textTertiary },
 
-  totalSlot: { height: 24, alignItems: 'center', justifyContent: 'center' },
-  totalText: { fontSize: 14, color: Palette.textSecondary, fontVariant: ['tabular-nums'] },
-  totalNumber: { fontWeight: '700', color: Palette.textPrimary },
+  totalSlot: { height: 54, alignItems: 'center', justifyContent: 'center' },
+  totalInner: { alignItems: 'center', gap: 2 },
+  totalNumberRow: { fontVariant: ['tabular-nums'] },
+  totalNumber: { fontSize: 24, lineHeight: 30, fontWeight: '900', letterSpacing: -0.5, color: Palette.textPrimary },
+  totalUnit: { fontSize: 13, fontWeight: '700', color: Palette.textTertiary, letterSpacing: 0.4 },
+  totalKickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  totalKicker: { fontSize: 11, fontWeight: '700', letterSpacing: 2.2, color: Palette.textSecondary },
 
   heroArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // Designsystemets display: Arial Black 900, −0.03em.

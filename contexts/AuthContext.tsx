@@ -5,6 +5,7 @@ import { flush, forgetAnalyticsUser, setAnalyticsUser, track } from '../lib/anal
 import { revokeAppleSignIn, usesAppleSignIn } from '../lib/appleAuth';
 import { syncIntentions } from '../app/pauseLogger';
 import { clearLocalAccountData } from '../lib/localAccountData';
+import { acceptTerms as acceptTermsRpc, takeTermsAgreedBeforeSignIn } from '../lib/moderation';
 import { clearPushToken } from '../lib/notifications';
 import { supabase } from '../lib/supabase';
 import { isUsernameAvailable, USERNAME_TAKEN_MESSAGE } from '../lib/username';
@@ -14,6 +15,11 @@ type AuthContextType = {
   session: Session | null;
   loading: boolean;
   onboardingCompleted: boolean | null;
+  /** Har användarvillkoren godkänts (`profiles.terms_accepted_at`)? `null`
+   *  = vet inte än. Grinden i app/_layout.tsx (components/terms-gate.tsx)
+   *  står över allt så länge det är `false`. */
+  termsAccepted: boolean | null;
+  acceptTerms: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
   signUp: (email: string, password: string, username?: string) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -48,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
 
   useEffect(() => {
     const initSession = async () => {
@@ -76,7 +83,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('Auth state changed:', event, session?.user?.id ?? 'no user');
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
@@ -110,27 +116,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) {
       setOnboardingCompleted(null);
+      setTermsAccepted(null);
       return;
     }
 
     supabase
       .from('profiles')
-      .select('onboarding_completed')
+      .select('onboarding_completed, terms_accepted_at')
       .eq('id', user.id)
       .maybeSingle()
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         // Ett fel är inte ett nej. Utan den här grenen blir `data` null när
         // nätet är nere, `?? false` gör det till "inte klar", och en gammal
         // användare som öppnar appen på tunnelbanan får fylla i sitt namn på
         // nytt. Hellre släppa in någon för tidigt än att be dem göra om
         // introduktionen på grund av dålig täckning — frågan ställs ändå igen
         // nästa gång det går att ställa den.
+        //
+        // Villkoren följer samma linje: ett fel stänger inte appen, och
+        // frågan ställs igen vid nästa start.
         if (error) {
           console.log('[auth] kunde inte läsa onboarding_completed:', error.message);
           setOnboardingCompleted(true);
+          setTermsAccepted(true);
           return;
         }
         setOnboardingCompleted(data?.onboarding_completed ?? false);
+
+        if (data?.terms_accepted_at) {
+          setTermsAccepted(true);
+          return;
+        }
+        // Godkänt på registreringen: e-postens konto bär det i metadatan
+        // (ingen session fanns att skriva med), Google och Apple i minnet.
+        const agreedAtSignUp =
+          !!user.user_metadata?.terms_accepted_at || takeTermsAgreedBeforeSignIn();
+        if (agreedAtSignUp) {
+          try {
+            await acceptTermsRpc();
+            setTermsAccepted(true);
+            return;
+          } catch (e: any) {
+            console.log('[auth] kunde inte spara villkoren:', e?.message);
+          }
+        }
+        setTermsAccepted(false);
       });
   }, [user]);
 
@@ -169,6 +199,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ensureProfile();
   }, [user]);
 
+  const acceptTerms = async () => {
+    await acceptTermsRpc();
+    setTermsAccepted(true);
+  };
+
   const signUp = async (email: string, password: string, username?: string) => {
     // Frågan ställs FÖRE kontot skapas, och det är hela poängen.
     //
@@ -192,10 +227,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { error: USERNAME_TAKEN_MESSAGE };
     }
 
+    // Kryssrutan på registreringen är ett krav för att komma hit. Tiden
+    // läggs i metadatan, eftersom det ofta inte finns någon session att
+    // skriva profilen med förrän e-posten bekräftats; AuthContext flyttar
+    // den till `profiles.terms_accepted_at` vid första inloggningen.
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: username ? { data: { username } } : undefined,
+      options: { data: { ...(username ? { username } : {}), terms_accepted_at: new Date().toISOString() } },
     });
     if (error) {
       const msg = error.message.toLowerCase();
@@ -307,7 +346,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, onboardingCompleted, completeOnboarding, signUp, signIn, signOut, deleteAccount }}>
+    <AuthContext.Provider value={{ user, session, loading, onboardingCompleted, termsAccepted, acceptTerms, completeOnboarding, signUp, signIn, signOut, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );
